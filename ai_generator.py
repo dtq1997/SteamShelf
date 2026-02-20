@@ -494,6 +494,7 @@ class SteamAIGenerator:
             self._last_search_warn = (
                 WARN_GOOGLE_UNAVAIL if web_search_mode == "local"
                 else WARN_AITOOL_UNAVAIL)
+            _step1_text = ""  # 清空错误内容，避免污染 Step 2
 
         # ── Step 2：写作阶段（完整提示词，无 web_search 工具）──
         # 模型全部注意力集中在遵循格式/内容指令上
