@@ -270,7 +270,8 @@ class SteamAIGenerator:
             web_search_mode = "ai_web" if use_web_search else "local"
         else:
             web_search_mode = _compat.get(web_search_mode, web_search_mode)
-        _ws_active = True  # 两个模式都做搜索
+        # anthropic 和 openai_compat（代理）支持搜索；openai/deepseek 原生不支持
+        _ws_active = self.provider in ('anthropic', 'openai_compat')
 
         # ── 第一段：任务声明 + 联网搜索触发（如有）──
         user_msg = "请为以下 Steam 游戏撰写游戏说明笔记：\n\n"

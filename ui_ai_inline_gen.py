@@ -515,9 +515,9 @@ class InlineAIGenMixin:
         _reviews_ok = False
         try:
             details = get_game_details_from_steam(aid)
+            _details_ok = True  # API 调用成功即可，游戏无商店页不算故障
             if details:
                 game_context = format_game_context(details)
-                _details_ok = True
                 if details.get("name") and name.startswith("AppID"):
                     name = details["name"]
         except urllib.error.HTTPError as e:
