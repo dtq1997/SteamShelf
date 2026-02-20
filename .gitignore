@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# AI assistant local config
+.claude/
+
+# Linter cache
+.ruff_cache/
+
+# Development artifacts (not part of release)
+_backup/
+_dead_code/
+_legacy_A/
+_scripts/
+
+# Probe/test result files
+probe_*.json
+sort_probe_result.json
+
+# AI collaboration internal docs
+HANDOFF.md
+COLLAB_PREFS.md
+
+# Runtime config (user-specific, may contain API keys)
+config.json
+*.local.json
+.env*
