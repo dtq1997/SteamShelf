@@ -831,10 +831,15 @@ class SteamAIGenerator:
             data = json.loads(resp_body)
 
         content_blocks = data.get("content", [])
-        # 检测搜索工具是否真的被使用
+        # 检测搜索工具是否真的被成功使用
+        # 代理可能返回 web_search_tool_result 但 is_error=True（如 token 不足），
+        # 此时搜索块存在但实际未获取到任何信息，不算"已使用"
         if use_web_search:
-            self._last_search_actually_used = any(
-                'search' in b.get("type", "") for b in content_blocks)
+            search_results = [b for b in content_blocks
+                              if b.get("type") == "web_search_tool_result"]
+            self._last_search_actually_used = (
+                bool(search_results)
+                and not all(b.get("is_error") for b in search_results))
         text_parts = [b["text"] for b in content_blocks if b.get("type") == "text"]
 
         # ── 关键：联网搜索时只取最后一个有实质内容的 text block ──
