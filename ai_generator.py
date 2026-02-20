@@ -100,49 +100,39 @@ AI_SYSTEM_PROMPT = """你是一个 Steam 游戏介绍撰写助手。请根据用
 请直接输出纯文本内容，不要输出任何解释、前缀、标签或格式符号。"""
 
 
-# ── 联网搜索时追加的系统提示 ──
-AI_WEB_SEARCH_ADDENDUM = """
+# ── Step 1 统一搜索系统提示词（local 和 ai_web 共用） ──
+# 使用时将 {tool_name} 替换为实际工具名：
+#   ai_web → "web_search"，local → "search_internet"
+AI_SEARCH_SYSTEM_PROMPT = """\
+你是一个游戏信息收集助手。请使用联网搜索工具（{tool_name}）\
+搜索关于指定 Steam 游戏的信息，然后用简体中文整理搜索到的所有有效信息。
 
-🔍 你已获得联网搜索能力。在撰写之前，请主动搜索以下信息来增强你的描述质量：
-1. 这个游戏的实际游玩体验（搜索游戏名 + review / gameplay / 评测）
-2. 社区口碑和常见争议（搜索游戏名 + reddit / 讨论 / 争议）
-3. 大致通关时长或典型游玩时长（搜索游戏名 + how long to beat / 游玩时长）
-
-🌐 多语言搜索策略（非常重要）：
+🔍 搜索策略（非常重要）：
+- ⚠️ 必须用【游戏名称】搜索，绝对不要用 AppID 或数字编号搜索
 - 必须用英文游戏名搜索至少一次（英文搜索结果通常最丰富）
-- 如果游戏可能是日本开发/日文受众（如日式 RPG、视觉小说、同人游戏），
-  也用日文名搜索（搜索「ゲーム名 レビュー」或「ゲーム名 感想」）
 - 用中文游戏名也搜索一次
-- 不要仅依赖中文搜索结果，很多独立/小众游戏几乎没有中文资料，
-  但英文或日文社区可能有丰富的讨论
+- 如果游戏可能是日本开发/日文受众（如日式 RPG、视觉小说、同人游戏），\
+也用日文名搜索（搜索「ゲーム名 レビュー」或「ゲーム名 感想」）
 - 根据游戏的开发商/发行商国籍，判断哪种语言搜索更可能获得有效信息
-- 如果对这个游戏已经非常了解，可以少搜或不搜；如果不太确定，多搜几次
-- 搜索结果仅用于辅助你的写作，不要照抄搜索到的文字
-- 特别注意搜索该游戏的缺点和负面评价，因为提示词要求必须包含这些内容
+- 不要仅依赖中文搜索结果，很多独立/小众游戏几乎没有中文资料
+- 搜索游戏的实际游玩体验（游戏名 + review / gameplay）
+- 搜索社区口碑和争议（游戏名 + reddit / 讨论）
+- 搜索通关时长（游戏名 + how long to beat）
+- 特别注意搜索该游戏的缺点和负面评价
 
-📊 信息量评估与回退策略（非常重要）：
-- 搜索完成后，请严格评估搜索结果中"与这个游戏本身直接相关"的有效信息比例
-- 注意：游戏名称可能与其他事物同名，搜索结果中可能有大量不相关内容，这些不算有效信息
-- ⚠️ 回退规则：如果联网搜索发现网络上关于这个游戏的有效信息严重不足（如只搜到
-  不相关结果、或只有寥寥几句），你必须回退到主要依靠上面提供的 Steam 评测内容来
-  撰写游戏说明。请注意：即使全体搜索结果数量很多，但如果大部分都是不相关信息，
-  也应当视为"网络有效信息不足"而回退到 Steam 评测。
-  只有当联网搜索和 Steam 评测信息都严重不足时，才标注 INSUFFICIENT:true
-- 如果联网搜索发现有效信息很丰富就写"相当多"，
-  几乎没有相关信息就写"相当少"。
-  可选值：相当多 / 较多 / 中等 / 较少 / 相当少）
+📊 搜索结果质量判断：
+- 游戏名称可能与其他事物同名，搜索结果中可能有大量不相关内容，这些不算有效信息
+- 如果搜索结果大部分都是不相关信息，也应视为"网络有效信息不足"
 
-⚠️ 最终语言要求（最高优先级）：
-无论你搜索到的参考资料是英文、日文还是其他语言，你【必须】使用简体中文撰写最终的游戏说明笔记，严禁输出任何非中文的正文内容。
-严禁使用 Markdown 格式（如 **粗体**、## 标题），严禁使用分段式小标题（如「Gameplay:」、「Reviews:」），
-必须是纯文本单行中文叙述。
+整理时请涵盖以下方面（有多少写多少，没搜到的跳过）：
+- 游戏核心玩法和体验是什么
+- 打开游戏后前几分钟具体会看到什么、做什么
+- 社区口碑和评价（好评和差评都要）
+- 大致游玩时长和每次游玩时长
+- 缺点和常见抱怨
+- 适合什么类型的玩家
 
-🚫 联网搜索后的输出禁令（违反任何一条都是不合格的输出）：
-- 严禁在正文中添加引用标记（如 [1] [2,3] [1, 2, 3, 4] 等），搜索结果只是参考，正文中不需要标注来源
-- 严禁输出繁体中文（如「遊戲」「評價」「劇情」），必须使用简体中文（如"游戏""评价""剧情"）
-- 严禁逐条总结搜索结果，你的任务是用自己的话写一段连贯叙述
-- 严禁按搜索到的评测结构来组织内容（如"优点：……缺点：……"），必须自然融入叙述
-- 搜索结果只是帮你了解游戏的原料，最终输出必须完全是你自己组织的、像朋友聊天一样的说明文"""
+⚠️ 最终整理必须使用简体中文，即使搜索结果是英文或日文。"""
 
 
 class SteamAIGenerator:
@@ -273,15 +263,10 @@ class SteamAIGenerator:
         # anthropic 和 openai_compat（代理）支持搜索；openai/deepseek 原生不支持
         _ws_active = self.provider in ('anthropic', 'openai_compat')
 
-        # ── 第一段：任务声明 + 联网搜索触发（如有）──
+        # ── 第一段：任务声明 ──
         user_msg = "请为以下 Steam 游戏撰写游戏说明笔记：\n\n"
         user_msg += f"游戏名称：{game_name}\n"
         user_msg += f"Steam AppID：{app_id}\n"
-
-        # 联网搜索触发放在参考资料之前，让模型先搜索
-        if _ws_active:
-            user_msg += ("\n🔍 联网搜索已启用——请先用 web_search 搜索这个游戏的"
-                         "实际游玩体验、社区口碑、通关时长和常见缺点，再开始撰写。\n")
 
         # ── 第二段：参考资料（中间位置，被指令包裹）──
         if extra_context:
@@ -381,10 +366,6 @@ class SteamAIGenerator:
 
         prompt = system_prompt.strip() if system_prompt.strip() else AI_SYSTEM_PROMPT
 
-        # 联网搜索时追加搜索策略指引到系统提示词
-        if _ws_active:
-            prompt += AI_WEB_SEARCH_ADDENDUM
-
         if self.provider == 'anthropic':
             return self._call_anthropic(prompt, user_msg,
                                         web_search_mode=web_search_mode)
@@ -409,46 +390,23 @@ class SteamAIGenerator:
         # 格式/内容指令的注意力被严重稀释，退化为"搜索结果摘要器"。
         # 解决：让 Step 1 专注搜索、Step 2 专注写作，互不干扰。
 
-        # ── Step 1：搜索阶段（轻量提示词 + web_search 工具）──
+        # ── Step 1：搜索阶段（统一提示词 + 搜索工具）──
         # 只要求模型搜索和整理信息，不要求遵循复杂的格式/内容规则
-        _search_system = (
-            "你是一个游戏信息收集助手。请使用联网搜索工具（web_search）"
-            "搜索关于指定 Steam 游戏的信息，然后用简体中文整理搜索到的"
-            "所有有效信息。不需要特定格式，直接整理关键发现即可。"
-        )
-        # 从 AI_WEB_SEARCH_ADDENDUM 中提取搜索策略
-        _search_system += """
-
-🔍 搜索策略：
-- 必须用英文游戏名搜索至少一次（英文搜索结果通常最丰富）
-- 也用中文游戏名搜索
-- 搜索游戏的实际游玩体验（游戏名 + review / gameplay）
-- 搜索社区口碑和争议（游戏名 + reddit / 讨论）
-- 搜索通关时长（游戏名 + how long to beat）
-- 特别注意搜索该游戏的缺点和负面评价
-
-整理时请涵盖以下方面（有多少写多少，没搜到的跳过）：
-- 游戏核心玩法和体验是什么
-- 打开游戏后前几分钟具体会看到什么、做什么
-- 社区口碑和评价（好评和差评都要）
-- 大致游玩时长和每次游玩时长
-- 缺点和常见抱怨
-- 适合什么类型的玩家
-
-⚠️ 最终整理必须使用简体中文，即使搜索结果是英文或日文。"""
-
-        # Step 1 的 user message：精简版，只有游戏信息 + Steam 评测
         _name_match = re.search(r'游戏名称：(.+)', user_msg)
         _appid_match = re.search(r'Steam AppID：(\S+)', user_msg)
         _game_name = _name_match.group(1).strip() if _name_match else "未知游戏"
         _app_id = _appid_match.group(1).strip() if _appid_match else ""
 
+        # 根据模式选择工具名，填充统一搜索提示词
+        _tool_name = ("search_internet"
+                      if web_search_mode == "local" else "web_search")
+        _search_system = AI_SEARCH_SYSTEM_PROMPT.format(tool_name=_tool_name)
+
+        # Step 1 user message：只传游戏名称，不传 AppID（避免搜出垃圾）
         _search_user_msg = (
             f"请搜索以下 Steam 游戏的信息，并整理你的搜索发现：\n\n"
             f"游戏名称：{_game_name}\n"
         )
-        if _app_id:
-            _search_user_msg += f"Steam AppID：{_app_id}\n"
 
         # 把 Steam 评测也放进 Step 1（帮助模型了解游戏、减少无效搜索）
         _ref_match = re.search(
@@ -466,11 +424,8 @@ class SteamAIGenerator:
         _step1_error = ""
         try:
             if web_search_mode == "local":
-                _client_system = _search_system.replace(
-                    "联网搜索工具（web_search）",
-                    "联网搜索工具（search_internet）")
                 step1_result = self._call_anthropic_client_search(
-                    _client_system, _search_user_msg)
+                    _search_system, _search_user_msg)
             else:  # ai_web
                 step1_result = self._call_anthropic_inner(
                     _search_system, _search_user_msg, use_web_search=True)
@@ -498,13 +453,6 @@ class SteamAIGenerator:
 
         # ── Step 2：写作阶段（完整提示词，无 web_search 工具）──
         # 模型全部注意力集中在遵循格式/内容指令上
-
-        # 关键修复：base prompt 不包含 AI_WEB_SEARCH_ADDENDUM
-        # addendum 中写着"请主动搜索"，但 Step 2 没有搜索工具，会造成混乱
-        _base_system_prompt = system_prompt
-        if _base_system_prompt.endswith(AI_WEB_SEARCH_ADDENDUM):
-            _base_system_prompt = _base_system_prompt[
-                :-len(AI_WEB_SEARCH_ADDENDUM)].rstrip()
 
         # 清理 Step 1 输出中的引用标记
         _cleaned_step1 = re.sub(
@@ -587,9 +535,9 @@ class SteamAIGenerator:
                 "请直接输出游戏说明正文，然后在末尾附上元数据标签。"
             )
 
-        # Step 2 调用：无 web_search，base prompt 无搜索 addendum
+        # Step 2 调用：无 web_search，纯写作提示词
         result = self._call_anthropic_inner(
-            _base_system_prompt, _write_user_msg, use_web_search=False)
+            system_prompt, _write_user_msg, use_web_search=False)
 
         # 合并两步调试信息
         self._last_debug_info = (
