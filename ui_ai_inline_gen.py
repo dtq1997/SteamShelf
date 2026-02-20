@@ -27,8 +27,8 @@ except ImportError:
 from ai_generator import SteamAIGenerator, AI_SYSTEM_PROMPT
 from core_notes import (
     CONFIDENCE_EMOJI, INFO_VOLUME_EMOJI, QUALITY_EMOJI,
-    INFO_SOURCE_WEB, INSUFFICIENT_INFO_MARKER,
-    WARN_STEAM_UNAVAIL,
+    INFO_SOURCE_WEB, INFO_SOURCE_LOCAL, INSUFFICIENT_INFO_MARKER,
+    WARN_STEAM_UNAVAIL, WARN_STEAM_REVIEW_UNAVAIL,
     is_ai_note,
 )
 from steam_data import (
@@ -459,7 +459,7 @@ class InlineAIGenMixin:
 
             # 获取上下文 + 生成 + 保存
             try:
-                game_context, name, steam_warn = \
+                game_context, name, steam_warns = \
                     self._inline_fetch_context(aid, name)
             except urllib.error.HTTPError as e:
                 if e.code == 429:
@@ -476,7 +476,7 @@ class InlineAIGenMixin:
 
             ok = self._inline_generate_and_save(
                 aid, name, generator, custom_prompt,
-                ws_mode, game_context, steam_warn)
+                ws_mode, game_context, steam_warns)
             if ok is True:
                 success_count += 1
             elif ok is None:
@@ -507,16 +507,17 @@ class InlineAIGenMixin:
         self.root.after(0, self._inline_update_buttons)
 
     def _inline_fetch_context(self, aid, name):
-        """获取游戏详情+评测，返回 (context_str, updated_name, steam_warn)"""
+        """获取游戏详情+评测，返回 (context_str, updated_name, steam_warns)"""
         self.root.after(0, lambda a=aid, n=name:
             self._inline_log(f"📋 获取 {n} 的详细信息..."))
         game_context = ""
-        _steam_ok = False
+        _details_ok = False
+        _reviews_ok = False
         try:
             details = get_game_details_from_steam(aid)
             if details:
                 game_context = format_game_context(details)
-                _steam_ok = True
+                _details_ok = True
                 if details.get("name") and name.startswith("AppID"):
                     name = details["name"]
         except urllib.error.HTTPError as e:
@@ -533,7 +534,7 @@ class InlineAIGenMixin:
             if reviews_data:
                 review_ctx = format_review_context(reviews_data)
                 if review_ctx:
-                    _steam_ok = True
+                    _reviews_ok = True
                     game_context = ((game_context + "\n\n" + review_ctx)
                                     if game_context else review_ctx)
         except urllib.error.HTTPError as e:
@@ -543,14 +544,19 @@ class InlineAIGenMixin:
                         f"⚠️ {n}: Steam 评测 API 限速，跳过评测"))
         except Exception:
             pass
-        steam_warn = "" if _steam_ok else WARN_STEAM_UNAVAIL
-        return game_context, name, steam_warn
+        # 分别标注商店详情和评测的故障状态
+        steam_warns = []
+        if not _details_ok:
+            steam_warns.append(WARN_STEAM_UNAVAIL)
+        if not _reviews_ok:
+            steam_warns.append(WARN_STEAM_REVIEW_UNAVAIL)
+        return game_context, name, steam_warns
 
     # ────────────────────── 单游戏生成+保存 ──────────────────────
 
     def _inline_generate_and_save(self, aid, name, generator,
                                    custom_prompt, ws_mode, game_context,
-                                   steam_warn=""):
+                                   steam_warns=None):
         """生成单个游戏的 AI 笔记并保存，返回 True/False"""
         try:
             (content, actual_model, confidence,
@@ -573,20 +579,23 @@ class InlineAIGenMixin:
                 self._inline_log(
                     f"⚠️ {n} (AppID {a}): {w}"))
 
-        source_warnings = steam_warn + (" " + search_warn
-                                        if search_warn else "")
+        # 构建信息源故障标签（只显示故障源，用 | 分隔）
+        all_warns = list(steam_warns or [])
+        if search_warn:
+            all_warns.append(search_warn)
+        source_status = "|".join(all_warns)
 
         if is_insufficient:
             return self._inline_save_insufficient(
                 aid, name, actual_model, info_volume,
-                ws_mode, source_warnings)
+                ws_mode, source_status)
         if not content.strip():
             self.root.after(0, lambda a=aid:
                 self._inline_log(f"⚠️ AppID {a}: API 返回空内容"))
             return False
         return self._inline_save_normal(
             aid, name, content, actual_model, confidence,
-            info_volume, quality, ws_mode, source_warnings)
+            info_volume, quality, ws_mode, source_status)
 
     def _inline_handle_http_error(self, aid, e):
         """处理 HTTP 错误。返回 False=失败，None=429重试"""
@@ -611,18 +620,18 @@ class InlineAIGenMixin:
         return False
 
     def _inline_save_insufficient(self, aid, name, model, info_volume,
-                                   ws_mode, source_warnings=""):
+                                   ws_mode, source_status=""):
         """保存信息过少标注笔记"""
         vol_emoji = INFO_VOLUME_EMOJI.get(info_volume, "")
-        info_source_tag = INFO_SOURCE_WEB
-        warn_part = f" {source_warnings}" if source_warnings else ""
+        info_source_tag = INFO_SOURCE_WEB if ws_mode == "ai_web" else INFO_SOURCE_LOCAL
         date_str = datetime.now().strftime("%Y-%m-%d")
+        source_suffix = f" |{source_status}" if source_status else ""
         flat = (f"🤖AI: {INSUFFICIENT_INFO_MARKER} "
-                f"{info_source_tag}{warn_part} | "
+                f"{info_source_tag} | "
                 f"相关信息量：{info_volume}{vol_emoji} "
                 f"该游戏相关信息过少，无法生成有效的游戏说明。"
                 f"（由 {model} 判定）"
-                f" 📅生成于 {date_str}")
+                f" 📅生成于 {date_str}{source_suffix}")
         self.manager.create_note(aid, flat, flat)
         self.root.after(0, lambda a=aid, n=name, v=info_volume:
             self._inline_log(
@@ -632,27 +641,27 @@ class InlineAIGenMixin:
 
     def _inline_save_normal(self, aid, name, content, model,
                              confidence, info_volume, quality, ws_mode,
-                             source_warnings=""):
+                             source_status=""):
         """格式化并保存正常 AI 笔记"""
         conf_emoji = CONFIDENCE_EMOJI.get(confidence, "")
         vol_emoji = INFO_VOLUME_EMOJI.get(info_volume, "")
         qual_emoji = QUALITY_EMOJI.get(quality, "")
-        info_source_tag = INFO_SOURCE_WEB
-        warn_part = f" {source_warnings}" if source_warnings else ""
+        info_source_tag = INFO_SOURCE_WEB if ws_mode == "ai_web" else INFO_SOURCE_LOCAL
+        source_suffix = f" |{source_status}" if source_status else ""
         date_str = datetime.now().strftime("%Y-%m-%d")
 
         flat_content = ' '.join(content.strip().splitlines())
         flat_content = re.sub(
             r'\[/?[a-z0-9*]+(?:=[^\]]*)?\]', '', flat_content).strip()
         ai_prefix = (
-            f"🤖AI: {info_source_tag}{warn_part} | "
+            f"🤖AI: {info_source_tag} | "
             f"相关信息量：{info_volume}{vol_emoji} | "
             f"游戏总体质量：{quality}{qual_emoji} "
             f"⚠️ 以下内容由 {model} 生成，"
             f"该模型对以下内容的确信程度："
             f"{confidence}{conf_emoji}。")
         flat_content = (f"{ai_prefix} {flat_content}"
-                        f" 📅生成于 {date_str}")
+                        f" 📅生成于 {date_str}{source_suffix}")
 
         # 覆盖模式：删除旧 AI 笔记
         if not self._inline_skip_existing_var.get():

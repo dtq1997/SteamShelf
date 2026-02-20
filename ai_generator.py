@@ -488,6 +488,11 @@ class SteamAIGenerator:
                 WARN_GOOGLE_UNAVAIL if web_search_mode == "local"
                 else WARN_AITOOL_UNAVAIL)
             _step1_text = ""
+        elif not getattr(self, '_last_search_actually_used', True):
+            # Step 1 没报错但搜索工具未被使用（如 key 无权限）
+            self._last_search_warn = (
+                WARN_GOOGLE_UNAVAIL if web_search_mode == "local"
+                else WARN_AITOOL_UNAVAIL)
 
         # ── Step 2：写作阶段（完整提示词，无 web_search 工具）──
         # 模型全部注意力集中在遵循格式/内容指令上
@@ -664,6 +669,7 @@ class SteamAIGenerator:
         }
 
         debug_parts = []
+        self._last_search_actually_used = False
         for turn in range(self.web_search_max_uses + 2):
             payload = self._build_anthropic_payload(
                 system_prompt, messages, is_thinking,
@@ -703,6 +709,8 @@ class SteamAIGenerator:
                     result_text = "\n".join(
                         f"[{r['title']}]({r['url']}): {r['content']}"
                         for r in results) or "No results found."
+                    if results:
+                        self._last_search_actually_used = True
                 except Exception as e:
                     result_text = f"Search error: {e}"
                 tool_results.append({
@@ -822,6 +830,10 @@ class SteamAIGenerator:
             data = json.loads(resp_body)
 
         content_blocks = data.get("content", [])
+        # 检测搜索工具是否真的被使用
+        if use_web_search:
+            self._last_search_actually_used = any(
+                'search' in b.get("type", "") for b in content_blocks)
         text_parts = [b["text"] for b in content_blocks if b.get("type") == "text"]
 
         # ── 关键：联网搜索时只取最后一个有实质内容的 text block ──

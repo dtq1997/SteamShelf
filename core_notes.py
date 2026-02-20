@@ -129,9 +129,10 @@ INFO_SOURCE_WEB = "📡联网检索"
 INFO_SOURCE_LOCAL = "📚训练数据与Steam评测"
 
 # 信息源故障标注（用于笔记中标记哪个信息源不可用，可搜索"不可用"筛选）
-WARN_STEAM_UNAVAIL = "[⚠️Steam商店不可用]"
-WARN_GOOGLE_UNAVAIL = "[⚠️Google不可用]"
-WARN_AITOOL_UNAVAIL = "[⚠️联网工具不可用]"
+WARN_STEAM_UNAVAIL = "⚠️ Steam商店不可用"
+WARN_STEAM_REVIEW_UNAVAIL = "⚠️ Steam评测不可用"
+WARN_GOOGLE_UNAVAIL = "⚠️ Google不可用"
+WARN_AITOOL_UNAVAIL = "⚠️ 联网工具不可用"
 
 # 信息过少标记关键词（用于识别信息不足的标注性笔记）
 INSUFFICIENT_INFO_MARKER = "⛔信息过少"
