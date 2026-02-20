@@ -531,10 +531,10 @@ class InlineAIGenMixin:
             self._inline_log(f"💬 获取 {n} 的玩家评测..."))
         try:
             reviews_data = get_game_reviews_from_steam(aid)
+            _reviews_ok = True  # API 调用成功即可，游戏没评测不算故障
             if reviews_data:
                 review_ctx = format_review_context(reviews_data)
                 if review_ctx:
-                    _reviews_ok = True
                     game_context = ((game_context + "\n\n" + review_ctx)
                                     if game_context else review_ctx)
         except urllib.error.HTTPError as e:
