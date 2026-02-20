@@ -735,7 +735,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             review_col = ""
         rt_release = g.get('rt_release', 0)
         release_col = (datetime.fromtimestamp(rt_release).strftime("%Y-%m")
-                       if rt_release else "")
+                       if rt_release else g.get('release_date_str', ''))
         rt_purchased = g.get('rt_purchased', 0)
         acquired_col = (datetime.fromtimestamp(rt_purchased).strftime("%Y-%m")
                         if rt_purchased else "")

@@ -525,11 +525,19 @@ class LibraryCollectionsMixin:
                     v = src.get(k, 0)
                     if v:
                         entry[k] = v
-            # 回退：从 Store API 详情缓存补充 metacritic
-            if not entry.get('metacritic'):
-                detail = self._app_detail_cache.get(aid_str)
-                if isinstance(detail, dict) and detail.get('metacritic'):
+            # 回退：从 Store API 详情缓存补充 metacritic / release_date
+            detail = self._app_detail_cache.get(aid_str)
+            if isinstance(detail, dict):
+                if detail.get('_removed'):
+                    # 下架游戏：名字加前缀标识
+                    if name == f"AppID {aid}":
+                        entry['name'] = f"🚫 AppID {aid}"
+                    else:
+                        entry['name'] = f"🚫 {name}"
+                if not entry.get('metacritic') and detail.get('metacritic'):
                     entry['metacritic'] = detail['metacritic']
+                if not entry.get('rt_release') and detail.get('release_date'):
+                    entry['release_date_str'] = detail['release_date']
             games.append(entry)
         return games
 
@@ -586,7 +594,9 @@ class LibraryCollectionsMixin:
         else:
             all_app_ids = not_owned_app_ids
 
-        games = self._coll_filter_build_games(all_app_ids, owned_app_ids)
+        # "未入库"模式：强制 owned 为空，避免跨收藏夹重叠导致 is_owned 误判
+        effective_owned = set() if show_mode == "未入库" else owned_app_ids
+        games = self._coll_filter_build_games(all_app_ids, effective_owned)
         games.sort(key=lambda g: steam_sort_key(g['name']))
         self._lib_all_games = games
         self._viewing_collections = True
