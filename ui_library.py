@@ -52,7 +52,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         # 左侧：收藏夹 / 详情
         left = tk.Frame(body)
-        left.grid(row=0, column=0, sticky="nsew")
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
         tk.Label(left, text="⭐ Steam 分类",
                  font=("微软雅黑", 11, "bold")).pack(anchor=tk.W)
