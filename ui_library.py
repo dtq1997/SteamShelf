@@ -119,7 +119,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         # 中间分隔线（rowspan=3 覆盖主体+水平线+状态栏，结构性保证对齐）
         ttk.Separator(body, orient=tk.VERTICAL).grid(
-            row=0, column=1, rowspan=3, sticky="ns", padx=4, pady=1)
+            row=0, column=1, rowspan=3, sticky="ns", padx=4)
 
         # 右侧：游戏列表
         right = tk.Frame(body)
