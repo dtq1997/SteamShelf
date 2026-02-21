@@ -356,7 +356,7 @@ class SteamToolboxMain(
                 text=f"📁 分类: {_short_path(coll_dir)}",
                 font=("微软雅黑", 8), fg="#4a90d9", bg="#f0f0f0",
                 cursor="hand2")
-            coll_link.grid(row=0, column=0, sticky="w", padx=(20, 0))
+            coll_link.grid(row=0, column=0, sticky="w")
             coll_link.bind("<Button-1>", lambda e, d=coll_dir: self._open_folder(d))
 
         ttk.Separator(status_bar, orient=tk.VERTICAL).grid(
@@ -367,7 +367,7 @@ class SteamToolboxMain(
             text=f"📝 笔记: {_short_path(notes_dir)}",
             font=("微软雅黑", 8), fg="#4a90d9", bg="#f0f0f0",
             cursor="hand2")
-        notes_link.grid(row=0, column=2, sticky="w", padx=(20, 0))
+        notes_link.grid(row=0, column=2, sticky="w")
         notes_link.bind("<Button-1>", lambda e: self._open_folder(notes_dir))
 
         # ── 主内容区（原标签页 1: 游戏库） ──
