@@ -16,7 +16,7 @@ __version__ = "5.8.0"
 
 UPDATE_SOURCES = [
     "https://gitee.com/dtq1997/SteamShelf/releases/download/latest/version.json",
-    "https://github.com/dtq1997/SteamShelf/releases/download/latest/version.json",
+    "https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
 ]
 
 
