@@ -297,7 +297,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_tree.column("review_label", width=75, minwidth=55, stretch=False, anchor=tk.W)
         self._lib_tree.column("review", width=50, minwidth=40, stretch=False, anchor=tk.CENTER)
         self._lib_tree.column("release", width=70, minwidth=55, stretch=False, anchor=tk.CENTER)
-        self._lib_tree.column("acquired", width=70, minwidth=55, stretch=False, anchor=tk.CENTER)
+        self._lib_tree.column("acquired", width=82, minwidth=70, stretch=False, anchor=tk.CENTER)
         self._lib_tree.column("metacritic", width=35, minwidth=30, stretch=False, anchor=tk.CENTER)
 
         # 列可见性系统
@@ -305,7 +305,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             "type": (40, 35), "appid": (60, 50), "name": (300, 200),
             "notes": (45, 35), "source": (70, 50), "date": (82, 70),
             "review_label": (75, 55), "review": (50, 40),
-            "release": (70, 55), "acquired": (70, 55), "metacritic": (35, 30),
+            "release": (70, 55), "acquired": (82, 70), "metacritic": (35, 30),
         }
         _default_visible = {"type", "appid", "name", "notes", "source",
                             "date", "review_label", "review", "release"}
@@ -777,7 +777,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         release_col = (datetime.fromtimestamp(rt_release).strftime("%Y-%m")
                        if rt_release else g.get('release_date_str', ''))
         rt_purchased = g.get('rt_purchased', 0)
-        acquired_col = (datetime.fromtimestamp(rt_purchased).strftime("%Y-%m")
+        acquired_col = (datetime.fromtimestamp(rt_purchased).strftime("%Y-%m-%d")
                         if rt_purchased else "")
         mc = g.get('metacritic', 0)
         mc_col = str(mc) if mc else ""
