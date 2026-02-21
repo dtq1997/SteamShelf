@@ -336,41 +336,7 @@ class SteamToolboxMain(
         # 先同步加载持久化缓存（瞬时完成），确保两个标签页都能立刻使用
         self._ensure_game_name_cache_fast()
 
-        # ── 底部状态栏（可点击路径，必须在 notebook 之前 pack） ──
-        # 使用 grid 布局，列权重与游戏库标签页的 body 一致，使分隔线对齐中间工具条
-        status_bar = tk.Frame(root, bg="#f0f0f0", pady=4)
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=20)
-        status_bar.columnconfigure(0, weight=1, minsize=220)
-        status_bar.columnconfigure(1, weight=0)
-        status_bar.columnconfigure(2, weight=3, minsize=300)
-
-        def _short_path(p, parts=3):
-            """截取路径末尾几级目录用于显示"""
-            segs = p.replace("\\", "/").rstrip("/").split("/")
-            return (".../" if len(segs) > parts else "") + "/".join(segs[-parts:])
-
-        storage_path = getattr(self.current_account, 'storage_path', None)
-        if storage_path:
-            coll_dir = os.path.dirname(storage_path)
-            coll_link = tk.Label(status_bar,
-                text=f"📁 分类: {_short_path(coll_dir)}",
-                font=("微软雅黑", 8), fg="#4a90d9", bg="#f0f0f0",
-                cursor="hand2")
-            coll_link.grid(row=0, column=0, sticky="w")
-            coll_link.bind("<Button-1>", lambda e, d=coll_dir: self._open_folder(d))
-
-        ttk.Separator(status_bar, orient=tk.VERTICAL).grid(
-            row=0, column=1, sticky="ns", padx=4, pady=1)
-
-        notes_dir = self.current_account['notes_dir']
-        notes_link = tk.Label(status_bar,
-            text=f"📝 笔记: {_short_path(notes_dir)}",
-            font=("微软雅黑", 8), fg="#4a90d9", bg="#f0f0f0",
-            cursor="hand2")
-        notes_link.grid(row=0, column=2, sticky="w")
-        notes_link.bind("<Button-1>", lambda e: self._open_folder(notes_dir))
-
-        # ── 主内容区（原标签页 1: 游戏库） ──
+        # ── 主内容区（状态栏已集成到 body grid 中，保证分隔线对齐） ──
         library_frame = tk.Frame(root)
         library_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         self._build_library_tab(library_frame)
