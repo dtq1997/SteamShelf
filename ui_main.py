@@ -286,6 +286,7 @@ class SteamToolboxMain(
     def show_main_window(self):
         """显示主界面（标签页结构）"""
         self.root = tk.Tk()
+        self.root.withdraw()  # 隐藏窗口，构建完成后再显示（防止闪烁）
         self.root.title("SteamShelf")
         self.root.minsize(900, 600)
         root = self.root
@@ -306,9 +307,12 @@ class SteamToolboxMain(
         self._acc_label.pack(side=tk.LEFT, padx=(10, 6))
 
         # CEF / Cloud 状态标签 + 设置 / 切换账号
+        _cef_init_text = ("CEF: 🟢已连接" if self._cef_bridge is not None
+                          else "CEF: 未连接")
+        _cef_init_fg = "white" if self._cef_bridge is not None else "#aac8ee"
         self._cef_status_label = tk.Label(
-            acc_frame, text="CEF: 未连接",
-            font=("", 8), bg="#4a90d9", fg="#aac8ee")
+            acc_frame, text=_cef_init_text,
+            font=("", 8), bg="#4a90d9", fg=_cef_init_fg)
         self._cef_status_label.pack(side=tk.LEFT, padx=(2, 6))
 
         # 代理状态指示（动态更新）
@@ -346,7 +350,11 @@ class SteamToolboxMain(
         self._start_steam_monitor()
 
         # 自动尝试连接 CEF（如果可用）
-        self.root.after(500, self._auto_connect_cef)
+        if self._cef_bridge is not None and self._cef_bridge.is_connected():
+            # bridge 已从 intro 传入，立即使用
+            self.root.after(0, self._apply_cef_bridge)
+        else:
+            self.root.after(500, self._auto_connect_cef)
 
         # 窗口关闭时检查未保存的收藏夹更改 + 未上传笔记
         def _on_close():
@@ -386,6 +394,7 @@ class SteamToolboxMain(
         root.protocol("WM_DELETE_WINDOW", _on_close)
 
         self._center_window(root, width=1000, height=700)
+        root.deiconify()  # 构建完成，显示窗口
         root.mainloop()
 
     # ═══════════════════════════════════════════════════════════════════════════════

@@ -30,11 +30,13 @@ class SteamToolboxIntro:
 
         self._show_launch_ui(accounts)
 
-    def _launch_main(self, account):
+    def _launch_main(self, account, cef_bridge=None):
         """启动主界面（标签页版本）"""
         # lazy import 避免循环依赖（ui_main 导入了本模块）
         from ui_main import SteamToolboxMain
         main_ui = SteamToolboxMain(account, self.intro_ui)
+        if cef_bridge is not None:
+            main_ui._cef_bridge = cef_bridge
         main_ui.show_main_window()
 
     def _show_no_account_ui(self):
@@ -199,12 +201,12 @@ class SteamToolboxIntro:
                     # 确保 Steam 已完全加载
                     if bridge.is_steam_fully_loaded():
                         cef_id3 = bridge.get_logged_in_steam_id3()
-                        bridge.disconnect()
                         if cef_id3 is None or cef_id3 == account_id3:
-                            # 匹配或无法判断 → 直接进入
+                            # 匹配或无法判断 → 直接进入（保持 bridge 连接）
                             root.destroy()
-                            self._launch_main(account)
+                            self._launch_main(account, cef_bridge=bridge)
                             return
+                        bridge.disconnect()
                         # 不匹配
                         status_label.config(
                             text=f"Steam 登录的账号({cef_id3})与所选不匹配，正在重启 Steam...",
@@ -310,9 +312,9 @@ class SteamToolboxIntro:
 
             # 阶段5: Steam 已就绪，校验账号
             cef_id3 = bridge.get_logged_in_steam_id3()
-            bridge.disconnect()
 
             if cef_id3 is not None and cef_id3 != account_id3:
+                bridge.disconnect()
                 cancel_btn.pack_forget()
                 status_label.config(
                     text=f"❌ Steam 登录的账号({cef_id3})与所选({account.friend_code})不匹配，\n"
@@ -340,7 +342,8 @@ class SteamToolboxIntro:
                     fg="#2e7d32")
 
             cancel_btn.pack_forget()
-            root.after(400, lambda: (root.destroy(), self._launch_main(account)))
+            root.after(400, lambda b=bridge: (
+                root.destroy(), self._launch_main(account, cef_bridge=b)))
 
         def launch_file():
             account = get_account()

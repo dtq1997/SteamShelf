@@ -485,6 +485,18 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         threading.Thread(target=bg_thread(_bg_check), daemon=True).start()
 
+    def _apply_cef_bridge(self):
+        """bridge 已从 intro 传入时，立即应用（跳过连接步骤）"""
+        bridge = self._cef_bridge
+        self._update_library_cloud_status()
+        if self._collections_core:
+            self._collections_core.cef = bridge
+        self._lib_status.config(text="🔄 正在从 CEF 获取数据...")
+        self.root.update_idletasks()
+        self._lib_enhance_name_cache_from_cef()
+        self._lib_load_collections()
+        self._lib_load_owned_from_cef()
+
     def _lib_load_initial(self):
         """库管理标签页的初始数据加载"""
         # 后台加载本地库数据
