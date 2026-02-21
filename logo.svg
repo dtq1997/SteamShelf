@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1b2838"/>
+      <stop offset="100%" stop-color="#0f1923"/>
+    </linearGradient>
+    <linearGradient id="s1" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#66c0f4" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#66c0f4" stop-opacity="0.08"/>
+    </linearGradient>
+    <linearGradient id="s2" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#a4d7f5" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#a4d7f5" stop-opacity="0.05"/>
+    </linearGradient>
+    <clipPath id="rc">
+      <rect width="512" height="512" rx="90" ry="90"/>
+    </clipPath>
+  </defs>
+
+  <rect width="512" height="512" rx="90" ry="90" fill="url(#bg)"/>
+
+  <g clip-path="url(#rc)">
+    <!-- 蒸汽：5缕，宽窄交错，S形曲线 -->
+    <path d="M175 210 Q155 165 180 120 Q205 75 185 30 Q170 -5 185 -35"
+          stroke="url(#s2)" stroke-width="10" fill="none" stroke-linecap="round" opacity="0.45"/>
+    <path d="M215 200 Q235 150 215 100 Q195 55 220 10 Q240 -25 225 -55"
+          stroke="url(#s1)" stroke-width="15" fill="none" stroke-linecap="round" opacity="0.65"/>
+    <path d="M265 195 Q245 145 270 95 Q295 45 272 -5 Q255 -40 275 -70"
+          stroke="url(#s1)" stroke-width="20" fill="none" stroke-linecap="round" opacity="0.8"/>
+    <path d="M315 200 Q335 155 312 108 Q290 65 315 20 Q335 -15 320 -45"
+          stroke="url(#s1)" stroke-width="14" fill="none" stroke-linecap="round" opacity="0.55"/>
+    <path d="M355 215 Q340 175 358 135 Q375 95 355 55 Q340 25 355 -10"
+          stroke="url(#s2)" stroke-width="9" fill="none" stroke-linecap="round" opacity="0.35"/>
+
+    <!-- 书架外框 -->
+    <rect x="105" y="225" width="302" height="250" rx="8" ry="8"
+          fill="none" stroke="#c7d5e0" stroke-width="10"/>
+    <!-- 层板 -->
+    <line x1="105" y1="308" x2="407" y2="308" stroke="#c7d5e0" stroke-width="7"/>
+    <line x1="105" y1="391" x2="407" y2="391" stroke="#c7d5e0" stroke-width="7"/>
+
+    <!-- 第一层书本 -->
+    <rect x="130" y="237" width="26" height="63" rx="3" fill="#66c0f4"/>
+    <rect x="163" y="243" width="20" height="57" rx="3" fill="#4a90d9"/>
+    <rect x="189" y="239" width="30" height="61" rx="3" fill="#1a9fff"/>
+    <rect x="226" y="245" width="18" height="55" rx="3" fill="#4a90d9" opacity="0.65"/>
+    <rect x="250" y="240" width="24" height="60" rx="3" fill="#66c0f4" opacity="0.8"/>
+    <rect x="280" y="244" width="20" height="56" rx="3" fill="#1a9fff" opacity="0.6"/>
+
+    <!-- 第二层书本 -->
+    <rect x="130" y="318" width="24" height="65" rx="3" fill="#1a9fff"/>
+    <rect x="160" y="314" width="28" height="69" rx="3" fill="#66c0f4"/>
+    <rect x="195" y="320" width="22" height="63" rx="3" fill="#4a90d9" opacity="0.8"/>
+    <rect x="223" y="316" width="20" height="67" rx="3" fill="#1a9fff" opacity="0.7"/>
+    <rect x="249" y="319" width="26" height="64" rx="3" fill="#66c0f4" opacity="0.65"/>
+
+    <!-- 第三层书本 -->
+    <rect x="130" y="402" width="28" height="63" rx="3" fill="#4a90d9"/>
+    <rect x="164" y="398" width="22" height="67" rx="3" fill="#66c0f4"/>
+    <rect x="192" y="404" width="26" height="61" rx="3" fill="#1a9fff" opacity="0.8"/>
+    <rect x="224" y="400" width="20" height="65" rx="3" fill="#4a90d9" opacity="0.7"/>
+    <!-- 斜靠 -->
+    <rect x="254" y="401" width="20" height="62" rx="3" fill="#66c0f4" opacity="0.55"
+          transform="rotate(-12, 264, 432)"/>
+  </g>
+</svg>

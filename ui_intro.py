@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from account_manager import SteamAccountScanner
-from ui_utils import bg_thread
+from ui_utils import bg_thread, set_window_icon
 
 try:
     from cef_bridge import CEFBridge
@@ -44,6 +44,7 @@ class SteamToolboxIntro:
         root = tk.Tk()
         root.title("SteamShelf")
         root.resizable(False, False)
+        set_window_icon(root)
 
         tk.Label(root, text="❌ 自动发现 Steam 账号失败", font=("微软雅黑", 14, "bold"), fg="red").pack(pady=20)
         tk.Label(root,
@@ -65,6 +66,7 @@ class SteamToolboxIntro:
         root = tk.Tk()
         root.title("SteamShelf")
         root.resizable(False, False)
+        set_window_icon(root)
 
         has_cef = CEFBridge is not None
 
@@ -462,16 +464,6 @@ class SteamToolboxIntro:
                        ).pack(side="left", padx=5)
             ttk.Button(btn_frame2, text="关闭", command=win.destroy
                        ).pack(side="left", padx=5)
-
-        bottom_frame = tk.Frame(root)
-        bottom_frame.pack(pady=(0, 10))
-        debug_btn = ttk.Button(bottom_frame, text="🔧 诊断 CEF 连接",
-                               command=_show_debug,
-                               state="normal" if has_cef else "disabled")
-        debug_btn.pack()
-        refresh_btn = ttk.Button(bottom_frame, text="🔄 刷新状态",
-                                 command=_refresh_steam_status)
-        refresh_btn.pack(pady=(3, 0))
 
         root.update_idletasks()
         cw, ch = root.winfo_reqwidth(), root.winfo_reqheight()

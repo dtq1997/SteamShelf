@@ -25,7 +25,7 @@ from cef_bridge import CEFBridge
 
 # 导入全局补丁（模块导入时自动执行）
 import ui_utils  # noqa: F401
-from ui_utils import ProgressWindow
+from ui_utils import ProgressWindow, set_window_icon
 
 from core_notes import SteamNotesManager
 from ai_generator import SteamAIGenerator
@@ -288,6 +288,7 @@ class SteamToolboxMain(
         self.root = tk.Tk()
         self.root.withdraw()  # 隐藏窗口，构建完成后再显示（防止闪烁）
         self.root.title("SteamShelf")
+        set_window_icon(self.root)
         self.root.minsize(900, 600)
         root = self.root
 
@@ -296,6 +297,12 @@ class SteamToolboxMain(
         acc_frame.pack(fill=tk.X)
 
         # 账号信息 + Steam 状态
+        import os as _os
+        _logo_bar = _os.path.join(_os.path.dirname(__file__), "logo_24.png")
+        if _os.path.exists(_logo_bar):
+            self._bar_logo_img = tk.PhotoImage(file=_logo_bar)
+            tk.Label(acc_frame, image=self._bar_logo_img,
+                     bg="#4a90d9").pack(side=tk.LEFT, padx=(8, 2))
         steam_info = CEFBridge.detect_steam_process()
         steam_tag = "🟢 运行中" if steam_info['running'] else "⚫ 未运行"
         acc_info = (f"👤 {self.current_account['persona_name']}  |  "

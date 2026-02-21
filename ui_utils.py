@@ -132,6 +132,19 @@ def _patch_dialogs_topmost():
 _patch_dialogs_topmost()
 
 
+def set_window_icon(root):
+    """为 Tk 窗口设置 SteamShelf logo 图标"""
+    import os
+    logo = os.path.join(os.path.dirname(__file__), "logo.png")
+    if os.path.exists(logo):
+        try:
+            img = tk.PhotoImage(file=logo)
+            root.iconphoto(True, img)
+            root._logo_img = img  # 防止 GC 回收
+        except Exception:
+            pass
+
+
 def bg_thread(fn):
     """后台线程装饰器：捕获异常并打印+写日志，防止 daemon 线程静默失败"""
     @functools.wraps(fn)
