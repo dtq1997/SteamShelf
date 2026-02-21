@@ -76,8 +76,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         self._coll_tree = ttk.Treeview(coll_frame, show="tree", height=12, selectmode="extended")
         self._coll_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        coll_scroll = ttk.Scrollbar(coll_frame, orient=tk.VERTICAL,
-                                     command=self._coll_tree.yview)
+        coll_scroll = tk.Scrollbar(coll_frame, orient=tk.VERTICAL,
+                                    command=self._coll_tree.yview)
         coll_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._coll_tree.config(yscrollcommand=coll_scroll.set)
 
@@ -337,8 +337,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         self._lib_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        lib_scroll = ttk.Scrollbar(lib_list_frame, orient=tk.VERTICAL,
-                                    command=self._lib_tree.yview)
+        lib_scroll = tk.Scrollbar(lib_list_frame, orient=tk.VERTICAL,
+                                   command=self._lib_tree.yview)
         lib_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._lib_tree.config(yscrollcommand=lib_scroll.set)
 
