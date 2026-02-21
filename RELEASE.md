@@ -41,8 +41,9 @@ git push && git push --tags
 - 推送 `v*` 标签时自动触发
 - 并行打包 Windows exe + macOS app + 源码 zip
 - 自动创建 GitHub Release 页面
-- 自动更新 `latest` release 的 `version.json`
-- 用户客户端启动时检查 `version.json`，发现新版本则顶栏提示
+- `version.json` 和三个 zip 放在同一个 Release 里
+- GitHub 自动标记最新 Release 为 "Latest"
+- 用户客户端通过 `/releases/latest/download/version.json` 检查更新（GitHub 内置重定向）
 
 ## 关键文件
 
@@ -57,13 +58,11 @@ git push && git push --tags
 ## 更新源
 
 客户端按顺序尝试（`updater.py` UPDATE_SOURCES）：
-1. `https://gitee.com/dtq1997/SteamShelf/releases/download/latest/version.json`
-2. `https://github.com/dtq1997/SteamShelf/releases/download/latest/version.json`
-
-Gitee 源需手动同步（从 GitHub Release 下载后上传到 Gitee Release）。
+1. `https://gitee.com/dtq1997/SteamShelf/releases/download/latest/version.json`（Gitee 需手动同步）
+2. `https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json`（GitHub 内置重定向）
 
 ## 故障排查
 
 - **Actions 失败**：去 GitHub Actions 页面看日志，通常是依赖安装或打包问题
-- **用户收不到更新**：检查 `latest` release 是否有 `version.json`
+- **用户收不到更新**：检查最新 Release 里是否有 `version.json`
 - **下载链接 404**：检查 Release 页面的附件是否上传成功
