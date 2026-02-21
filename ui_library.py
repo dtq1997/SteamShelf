@@ -47,12 +47,13 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         body = tk.Frame(frame)
         body.pack(fill=tk.BOTH, expand=True)
         body.columnconfigure(0, weight=1, minsize=220)
-        body.columnconfigure(1, weight=3, minsize=300)
+        body.columnconfigure(1, weight=0)
+        body.columnconfigure(2, weight=3, minsize=300)
         body.rowconfigure(0, weight=1)
 
         # 左侧：收藏夹 / 详情
         left = tk.Frame(body)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        left.grid(row=0, column=0, sticky="nsew")
 
         tk.Label(left, text="⭐ Steam 分类",
                  font=("微软雅黑", 11, "bold")).pack(anchor=tk.W)
@@ -115,9 +116,13 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         style.configure("Filter.TCheckbutton", font=("微软雅黑", 8))
         style.configure("Filter.TRadiobutton", font=("微软雅黑", 8))
 
+        # 中间分隔线（与底部状态栏分隔线对齐）
+        ttk.Separator(body, orient=tk.VERTICAL).grid(
+            row=0, column=1, sticky="ns", padx=4, pady=1)
+
         # 右侧：游戏列表
         right = tk.Frame(body)
-        right.grid(row=0, column=1, sticky="nsew")
+        right.grid(row=0, column=2, sticky="nsew")
 
         # 标题行 + 勾选筛选（同一行）
         title_frame = tk.Frame(right)
