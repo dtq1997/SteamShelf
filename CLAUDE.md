@@ -21,6 +21,12 @@
    - 导入链：`cd unified && python3 -c "import <modified_module>"` 验证无 ImportError
    - 如涉及数据层：写临时脚本调用修改的函数，验证输入→输出正确
    - GUI 无法无头运行，但可验证到「导入成功 + 构造函数不报错」这一层
+   - **UI 布局/空间类修改 → 像素级验证（不依赖用户目视）：**
+     1. 写临时脚本，用与真实 app 相同的 grid/pack 结构构建最小测试窗口
+     2. `Quartz.CGWindowListCopyWindowInfo` 获取 CGWindowID → `screencapture -l` 截图
+     3. PIL 像素分析：定位目标元素坐标，量化验证对齐/间距/覆盖（如 `sep_y_end > text_y_end → ✅`）
+     4. 验证失败 → 修复 → 重跑截图分析 → 循环直到通过
+     5. 完成后删除临时脚本和截图
 6. 全部通过后，输出最终质量报告：
 
 ```

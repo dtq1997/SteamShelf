@@ -117,10 +117,6 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         style.configure("Filter.TCheckbutton", font=("微软雅黑", 8))
         style.configure("Filter.TRadiobutton", font=("微软雅黑", 8))
 
-        # 中间分隔线（rowspan=3 覆盖主体+水平线+状态栏，结构性保证对齐）
-        ttk.Separator(body, orient=tk.VERTICAL).grid(
-            row=0, column=1, rowspan=3, sticky="ns", padx=4)
-
         # 右侧：游戏列表
         right = tk.Frame(body)
         right.grid(row=0, column=2, sticky="nsew")
@@ -421,34 +417,33 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         threading.Thread(target=bg_thread(self._bg_init_game_names), daemon=True).start()
 
     def _build_status_bar(self, body):
-        """在 body grid 的 row=1 构建底部状态栏（与主体共享列，分隔线自动对齐）"""
+        """在 body grid 的 row=1 构建底部状态栏（与主体共享列，保证对齐）"""
         import os
 
         def _short_path(p, parts=3):
             segs = p.replace("\\", "/").rstrip("/").split("/")
             return (".../" if len(segs) > parts else "") + "/".join(segs[-parts:])
 
-        # 水平分隔线（跨所有列）
-        ttk.Separator(body, orient=tk.HORIZONTAL).grid(
-            row=1, column=0, columnspan=3, sticky="ew", pady=(4, 0))
-
-        # 状态标签（row=2，与主体共享 column 0 和 column 2）
-        body.rowconfigure(2, weight=0)
+        # 状态标签（row=1，与主体共享 column 0 和 column 2）
         storage_path = getattr(self.current_account, 'storage_path', None)
         if storage_path:
             coll_dir = os.path.dirname(storage_path)
             coll_link = tk.Label(body,
                 text=f"📁 分类: {_short_path(coll_dir)}",
                 font=("微软雅黑", 8), fg="#4a90d9", cursor="hand2")
-            coll_link.grid(row=2, column=0, sticky="w", pady=(2, 0))
+            coll_link.grid(row=1, column=0, sticky="w", pady=(4, 0))
             coll_link.bind("<Button-1>",
                            lambda e, d=coll_dir: self._open_folder(d))
+
+        # 短分隔线（仅状态栏行，column=1）
+        ttk.Separator(body, orient=tk.VERTICAL).grid(
+            row=1, column=1, sticky="ns", padx=4, pady=(4, 0))
 
         notes_dir = self.current_account['notes_dir']
         notes_link = tk.Label(body,
             text=f"📝 笔记: {_short_path(notes_dir)}",
             font=("微软雅黑", 8), fg="#4a90d9", cursor="hand2")
-        notes_link.grid(row=2, column=2, sticky="w", pady=(2, 0))
+        notes_link.grid(row=1, column=2, sticky="w", pady=(4, 0))
         notes_link.bind("<Button-1>",
                         lambda e: self._open_folder(notes_dir))
 
