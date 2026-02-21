@@ -362,6 +362,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 if item and self._lib_tree.get_children(item):
                     element = self._lib_tree.identify_element(event.x, event.y)
                     if "indicator" in str(element):
+                        self._lib_tree.focus(item)
                         is_open = self._lib_tree.item(item, 'open')
                         self._lib_tree.item(item, open=not is_open)
                         return "break"

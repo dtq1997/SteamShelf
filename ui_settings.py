@@ -36,7 +36,7 @@ class SettingsMixin:
         win.title("⚙️ 设置")
         win.resizable(False, False)
 
-        tk.Label(win, text="⚙️ 设置", font=("", 13, "bold")).pack(pady=(15, 10))
+        # 标题栏已有"⚙️ 设置"，不再重复
 
         frame = tk.Frame(win, padx=20)
         frame.pack(fill=tk.X)
@@ -102,13 +102,6 @@ class SettingsMixin:
         self._maint_btn.pack(side=tk.LEFT)
         tk.Label(maint_row, text="笔记去重、日期补充、DLC 清理等",
                  font=("", 9), fg="#666").pack(side=tk.LEFT, padx=(8, 0))
-
-        about_row = tk.Frame(frame)
-        about_row.pack(fill=tk.X, pady=3)
-        ttk.Button(about_row, text="ℹ️ 关于", width=12,
-                   command=self._ui_show_about).pack(side=tk.LEFT)
-        tk.Label(about_row, text="关于作者", font=("", 9), fg="#666").pack(
-            side=tk.LEFT, padx=(8, 0))
 
         ttk.Button(win, text="关闭", command=win.destroy).pack(pady=(10, 15))
         self._center_window(win)
@@ -357,7 +350,7 @@ class SettingsMixin:
         motto_label.bind("<Button-1>",
                          lambda e: webbrowser.open("https://aweidao1.com/t/986949"))
 
-        ttk.Button(about, text="确定", command=about.destroy).pack(pady=(5, 15))
+        ttk.Button(about, text="是的", command=about.destroy).pack(pady=(5, 15))
         self._center_window(about)
 
     def _ui_open_dir(self):

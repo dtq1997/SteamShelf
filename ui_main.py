@@ -301,8 +301,10 @@ class SteamToolboxMain(
         _logo_bar = _os.path.join(_os.path.dirname(__file__), "logo_24.png")
         if _os.path.exists(_logo_bar):
             self._bar_logo_img = tk.PhotoImage(file=_logo_bar)
-            tk.Label(acc_frame, image=self._bar_logo_img,
-                     bg="#4a90d9").pack(side=tk.LEFT, padx=(8, 2))
+            _logo_lbl = tk.Label(acc_frame, image=self._bar_logo_img,
+                                 bg="#4a90d9", cursor="hand2")
+            _logo_lbl.pack(side=tk.LEFT, padx=(8, 2))
+            _logo_lbl.bind("<Button-1>", lambda e: self._ui_show_about())
         steam_info = CEFBridge.detect_steam_process()
         steam_tag = "🟢 运行中" if steam_info['running'] else "⚫ 未运行"
         acc_info = (f"👤 {self.current_account['persona_name']}  |  "
@@ -329,7 +331,14 @@ class SteamToolboxMain(
         self._proxy_status_label.pack(side=tk.LEFT, padx=(2, 6))
         self._update_proxy_status()
 
-        # Cloud 上传状态（非阻塞进度显示，浮动内容放最右）
+        # AI 模型指示（动态更新）
+        self._ai_model_label = tk.Label(
+            acc_frame, text="", font=("", 8),
+            bg="#4a90d9", fg="#aac8ee")
+        self._ai_model_label.pack(side=tk.LEFT, padx=(2, 6))
+        self._update_ai_model_label()
+
+        # Cloud 上传状态（非阻塞进度显示，在 AI 模型右边）
         self._cloud_upload_label = tk.Label(
             acc_frame, text="", font=("", 8, "bold"),
             bg="#4a90d9", fg="#aac8ee")
@@ -450,6 +459,17 @@ class SteamToolboxMain(
         # 4. 持久化合并后的缓存
         self._persist_name_cache()
         self._game_name_cache_loaded = True
+
+    def _update_ai_model_label(self):
+        """刷新顶部栏 AI 模型指示"""
+        tokens = self._get_ai_tokens()
+        idx = self._get_active_token_index()
+        if tokens and 0 <= idx < len(tokens):
+            t = tokens[idx]
+            self._ai_model_label.config(
+                text=f"🤖 {t.get('model', '?')}", fg="white")
+        else:
+            self._ai_model_label.config(text="🤖 未配置", fg="#aac8ee")
 
     def _update_proxy_status(self):
         """刷新顶部栏代理状态指示（结果缓存到 self._has_proxy / _proxy_country）"""

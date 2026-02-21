@@ -15,7 +15,7 @@ def build_ai_settings_ui(app):
     win.grab_set()
 
     # ── 顶部标题 ──
-    tk.Label(win, text="🔑 API Key 与 AI 配置", font=("", 13, "bold")).pack(pady=(15, 5))
+    # 标题栏已有窗口名，不再重复
     config_info_frame = tk.Frame(win)
     config_info_frame.pack(pady=(0, 5))
     tk.Label(config_info_frame, text="管理多个 AI 令牌，在 AI 生成页面可自由切换。",
@@ -53,6 +53,8 @@ def build_ai_settings_ui(app):
 
     def _save_tokens():
         app._save_ai_tokens(tokens_data, active_idx[0])
+        if hasattr(app, '_update_ai_model_label'):
+            app._update_ai_model_label()
 
     def _refresh_token_list():
         sel = tokens_listbox.curselection()

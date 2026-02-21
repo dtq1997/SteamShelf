@@ -70,10 +70,6 @@ class SteamToolboxIntro:
 
         has_cef = CEFBridge is not None
 
-        # 标题
-        tk.Label(root, text="🎮 SteamShelf",
-                 font=("微软雅黑", 14, "bold")).pack(pady=(20, 10))
-
         # Steam 运行状态指示区
         steam_status_frame = tk.Frame(root)
         steam_status_frame.pack(fill="x", padx=25, pady=(0, 8))
