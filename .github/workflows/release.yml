@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - run: pyinstaller SteamShelf.spec
+      - name: Zip Windows build
+        run: Compress-Archive -Path dist/SteamShelf/* -DestinationPath SteamShelf_win.zip
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win
+          path: SteamShelf_win.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - run: pyinstaller SteamShelf.spec
+      - name: Zip macOS build
+        run: cd dist && zip -r ../SteamShelf_mac.zip SteamShelf.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: SteamShelf_mac.zip
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package source
+        run: |
+          zip -r artifacts/SteamShelf_source.zip . \
+            -x '.git/*' '__pycache__/*' 'build/*' 'dist/*' \
+               '.github/*' '*.pyc' '_backup/*' '_dead_code/*'
+
+      - name: Extract version and generate version.json
+        id: meta
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          REPO="${{ github.repository }}"
+          TAG="${GITHUB_REF_NAME}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+          # 从 annotated tag 提取 changelog，没有则留空
+          CHANGELOG=$(git tag -l --format='%(contents:body)' "$TAG" | head -50)
+          # 转义 JSON 特殊字符
+          CHANGELOG_JSON=$(echo "$CHANGELOG" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")
+          cat > artifacts/version.json << ENDJSON
+          {
+            "version": "${VER}",
+            "changelog": ${CHANGELOG_JSON},
+            "download_urls": {
+              "win32":  ["${BASE}/SteamShelf_win.zip"],
+              "darwin": ["${BASE}/SteamShelf_mac.zip"],
+              "source": ["${BASE}/SteamShelf_source.zip"]
+            }
+          }
+          ENDJSON
+
+      - name: Create versioned Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "SteamShelf ${{ steps.meta.outputs.version }}" \
+            --generate-notes \
+            artifacts/win/SteamShelf_win.zip \
+            artifacts/mac/SteamShelf_mac.zip \
+            artifacts/SteamShelf_source.zip
+
+      - name: Update latest release (for auto-updater)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete old latest release if exists, then recreate
+          gh release delete latest --yes 2>/dev/null || true
+          git tag -f latest
+          git push origin latest --force
+          gh release create latest \
+            --title "Latest" \
+            --notes "Auto-updater endpoint. Current: v${{ steps.meta.outputs.version }}" \
+            artifacts/version.json

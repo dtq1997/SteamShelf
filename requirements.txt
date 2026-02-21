@@ -1,0 +1,5 @@
+pypinyin
+certifi
+websocket-client
+vdf
+pyinstaller
