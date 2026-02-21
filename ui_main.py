@@ -43,7 +43,7 @@ from ui_ai_inline_gen import InlineAIGenMixin
 from ui_ai_search import AISearchMixin
 from ui_intro import SteamToolboxIntro
 
-from steam_data import get_game_name_from_steam, get_app_name_and_type
+from steam_data import get_game_name_from_steam, get_app_name_and_type, get_review_summary
 from config_manager import ConfigManager
 from vdf_parser import parse_remotecache_syncstates as _vdf_parse_syncstates
 
@@ -695,6 +695,13 @@ class SteamToolboxMain(
                     time.sleep(min(3.0 * (2 ** attempt), 15.0))
                     continue
                 if detail is not None:
+                    # 追加评测摘要（轻量 API，不影响主流程）
+                    try:
+                        rv = get_review_summary(aid)
+                        if isinstance(rv, dict):
+                            detail.update(rv)
+                    except Exception:
+                        pass
                     return (aid, name, type_str, detail)
                 time.sleep(min(1.0 * (2 ** attempt), 5.0))
             return None
@@ -1026,6 +1033,8 @@ class SteamToolboxMain(
             menu = tk.Menu(self.root, tearoff=0)
             menu.add_command(label="📂 展开全部笔记", command=self._expand_all_notes)
             menu.add_command(label="📁 收起全部笔记", command=self._collapse_all_notes)
+            menu.add_separator()
+            menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
             self._smart_popup(menu, event.x_root, event.y_root)
             return
         current_sel = self._games_tree.selection()
@@ -1064,10 +1073,13 @@ class SteamToolboxMain(
         menu.add_separator()
         menu.add_command(label="📝 新建笔记", command=self._ui_create_note)
         menu.add_command(label="📥 导入笔记", command=self._ui_import)
+        menu.add_command(label="🗑 删除笔记", command=self._ui_delete_notes)
         menu.add_command(label="📂 打开笔记目录", command=self._ui_open_dir)
         menu.add_separator()
         menu.add_command(label="📂 展开全部笔记", command=self._expand_all_notes)
         menu.add_command(label="📁 收起全部笔记", command=self._collapse_all_notes)
+        menu.add_separator()
+        menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
         self._smart_popup(menu, event.x_root, event.y_root)
 
     def _get_selected_app_id(self):

@@ -57,8 +57,8 @@ def build_steam_data_settings_ui(app):
         else:
             steam_entry.config(show="•")
             show_btn.config(text="👁️")
-    show_btn = tk.Button(key_row, text="👁️", font=("", 9),
-                         relief=tk.FLAT, command=toggle_show)
+    show_btn = ttk.Button(key_row, text="👁️", style="Toolbutton",
+                          command=toggle_show)
     show_btn.pack(side=tk.LEFT, padx=(3, 0))
 
     steam_status = tk.Label(key_frame, text="", font=("", 8), fg="green")
@@ -288,16 +288,13 @@ def build_cookie_manager_ui(app):
             messagebox.showinfo("已清除", "Cookie 已清除。",
                                 parent=cookie_win)
 
-    show_btn = tk.Button(btn_frame, text="👁 显示",
-                         command=toggle_show,
-                         font=("微软雅黑", 9), width=10)
+    show_btn = ttk.Button(btn_frame, text="👁 显示",
+                          command=toggle_show, width=10)
     show_btn.pack(side="left", padx=(0, 8))
-    tk.Button(btn_frame, text="💾 保存 Cookie",
-              command=save_cookie, font=("微软雅黑", 9),
-              width=15).pack(side="left", padx=8)
-    tk.Button(btn_frame, text="🗑 清除 Cookie",
-              command=clear_cookie, font=("微软雅黑", 9),
-              width=15).pack(side="left", padx=8)
+    ttk.Button(btn_frame, text="💾 保存 Cookie",
+               command=save_cookie, width=15).pack(side="left", padx=8)
+    ttk.Button(btn_frame, text="🗑 清除 Cookie",
+               command=clear_cookie, width=15).pack(side="left", padx=8)
 
     tk.Label(cookie_win,
         text="⚠️ Cookie 包含敏感信息，请勿分享配置文件给他人",
@@ -451,19 +448,15 @@ def build_igdb_credentials_ui(app):
             messagebox.showinfo("已清除",
                 "IGDB API 凭证已清除。", parent=igdb_win)
 
-    show_btn = tk.Button(btn_frame, text="👁 显示",
-                         command=toggle_show,
-                         font=("微软雅黑", 9), width=8)
+    show_btn = ttk.Button(btn_frame, text="👁 显示",
+                          command=toggle_show, width=8)
     show_btn.pack(side="left", padx=(0, 5))
-    tk.Button(btn_frame, text="🔍 测试凭证",
-              command=test_credentials, font=("微软雅黑", 9),
-              width=12).pack(side="left", padx=5)
-    tk.Button(btn_frame, text="💾 保存凭证",
-              command=save_credentials, font=("微软雅黑", 9),
-              width=12).pack(side="left", padx=5)
-    tk.Button(btn_frame, text="🗑 清除凭证",
-              command=clear_credentials, font=("微软雅黑", 9),
-              width=12).pack(side="left", padx=5)
+    ttk.Button(btn_frame, text="🔍 测试凭证",
+               command=test_credentials, width=12).pack(side="left", padx=5)
+    ttk.Button(btn_frame, text="💾 保存凭证",
+               command=save_credentials, width=12).pack(side="left", padx=5)
+    ttk.Button(btn_frame, text="🗑 清除凭证",
+               command=clear_credentials, width=12).pack(side="left", padx=5)
 
     tk.Label(igdb_win,
         text="⚠️ API 凭证包含敏感信息，请勿分享配置文件给他人",

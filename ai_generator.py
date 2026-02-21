@@ -58,6 +58,115 @@ def _search_startpage(query, max_results=5):
     return results
 
 
+def _search_ddg_lite(query, max_results=5):
+    """用 DuckDuckGo Lite 搜索，返回 [{url, title, content}]"""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    url = ("https://lite.duckduckgo.com/lite/?q="
+           + urllib.parse.quote(query))
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"),
+    })
+    with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+        page = resp.read().decode("utf-8", errors="replace")
+    results = []
+    # DDG Lite: <a href="//duckduckgo.com/l/?uddg=REAL_URL&rut=..."
+    #            class='result-link'>Title</a>
+    # 摘要: <td class='result-snippet'>...</td>
+    links = re.findall(
+        r"<a[^>]+href=['\"]([^'\"]+)['\"][^>]*class=['\"]result-link['\"]"
+        r"[^>]*>(.*?)</a>",
+        page, re.DOTALL)
+    snippets = re.findall(
+        r"<td\s+class=['\"]result-snippet['\"]>(.*?)</td>",
+        page, re.DOTALL)
+    for i, (raw_href, title_raw) in enumerate(links):
+        if len(results) >= max_results:
+            break
+        # 从 DDG 重定向 URL 提取真实 URL
+        m = re.search(r'uddg=([^&]+)', raw_href)
+        real_url = urllib.parse.unquote(m.group(1)) if m else raw_href
+        if real_url.startswith('//'):
+            real_url = 'https:' + real_url
+        # 跳过广告和 DDG 内部链接
+        if 'duckduckgo.com' in real_url:
+            continue
+        snip = _strip_html_tags(snippets[i]) if i < len(snippets) else ""
+        results.append({
+            "url": real_url,
+            "title": _strip_html_tags(title_raw),
+            "content": snip,
+        })
+    return results
+
+
+def _search_bing(query, max_results=5):
+    """用 Bing RSS 搜索，返回 [{url, title, content}]"""
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    url = ("https://www.bing.com/search?format=rss&q="
+           + urllib.parse.quote(query))
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"),
+    })
+    with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+        page = resp.read().decode("utf-8", errors="replace")
+    results = []
+    items = re.findall(r'<item>(.*?)</item>', page, re.DOTALL)
+    for item in items[:max_results]:
+        title_m = re.search(r'<title>(.*?)</title>', item)
+        link_m = re.search(r'<link>(.*?)</link>', item)
+        desc_m = re.search(r'<description>(.*?)</description>', item,
+                           re.DOTALL)
+        if title_m and link_m:
+            results.append({
+                "url": _html.unescape(link_m.group(1)),
+                "title": _html.unescape(title_m.group(1)),
+                "content": (_strip_html_tags(_html.unescape(desc_m.group(1)))
+                            if desc_m else ""),
+            })
+    return results
+
+
+def _search_web(query, max_results=5):
+    """多引擎降级搜索：DDG Lite → Startpage → Bing
+
+    相关性过滤：提取查询词，要求结果标题至少命中 2 个。
+    全部被过滤时，返回命中最多的那组结果（兜底，AI 可自行过滤噪音）。
+    """
+    last_err = None
+    best_results, best_hits = None, -1
+    qwords = {w.lower() for w in re.findall(r'[a-zA-Z]{3,}', query)}
+    qwords |= {query[i:i+2] for i in range(len(query) - 1)
+                if all('\u4e00' <= c <= '\u9fff' for c in query[i:i+2])}
+    for fn in (_search_ddg_lite, _search_startpage, _search_bing):
+        try:
+            results = fn(query, max_results)
+            if not results:
+                continue
+            if len(qwords) >= 2:
+                combined = ' '.join(r['title'].lower() for r in results)
+                hits = sum(1 for w in qwords if w in combined)
+                if hits >= 2:
+                    return results
+                if hits > best_hits:
+                    best_results, best_hits = results, hits
+            else:
+                return results
+        except Exception as e:
+            last_err = e
+    # 全部被过滤：返回命中最多的结果（兜底）
+    if best_results:
+        return best_results
+    if last_err:
+        raise last_err
+    return []
+
+
 # 默认系统提示词 — 来自导言区的【AI 撰写游戏说明笔记的指引】
 AI_SYSTEM_PROMPT = """你是一个 Steam 游戏介绍撰写助手。请根据用户提供的游戏信息，撰写一段客观的"游戏说明"笔记。
 
@@ -658,7 +767,7 @@ class SteamAIGenerator:
                 query = block.get("input", {}).get("query", "")
                 debug_parts.append(f"  搜索: {query}")
                 try:
-                    results = _search_startpage(query)
+                    results = _search_web(query)
                     result_text = "\n".join(
                         f"[{r['title']}]({r['url']}): {r['content']}"
                         for r in results) or "No results found."
@@ -676,12 +785,42 @@ class SteamAIGenerator:
                 break
             messages.append({"role": "user", "content": tool_results})
 
+        # ── 兜底：模型未调用搜索工具时，直接用本地搜索引擎 ──
+        # 代理/中转服务可能不支持 tool_use，导致模型从不调用 search_internet
+        fb_text = ""
+        if not self._last_search_actually_used:
+            _gn = re.search(r'游戏名称：(.+)', user_msg)
+            _fallback_q = _gn.group(1).strip() if _gn else ""
+            if _fallback_q:
+                # 多查询变体：防止单一查询被相关性过滤拦截
+                # （如 Bing 对 "Happy Live Show Up game review" 返回词典释义）
+                for _fq in [f"{_fallback_q} game review",
+                            f"{_fallback_q} Steam game",
+                            f'"{_fallback_q}"']:
+                    debug_parts.append(f"  兜底搜索: {_fq}")
+                    try:
+                        fb = _search_web(_fq)
+                        if fb:
+                            self._last_search_actually_used = True
+                            fb_text = "\n".join(
+                                f"[{r['title']}]({r['url']}): {r['content']}"
+                                for r in fb)
+                            debug_parts.append(
+                                f"  兜底成功: {len(fb)} 条结果")
+                            break
+                    except Exception as e:
+                        debug_parts.append(f"  兜底失败: {e}")
+
         self._last_debug_info = "\n".join(debug_parts)
 
         # 从最终响应提取文本
         text_parts = [b["text"] for b in data.get("content", [])
                       if b.get("type") == "text"]
         full_text = "\n".join(text_parts)
+
+        # 兜底搜索结果追加到模型输出前面
+        if fb_text:
+            full_text = fb_text + "\n" + full_text
 
         # 兼容 OpenAI 格式代理
         if not full_text and data.get("choices"):

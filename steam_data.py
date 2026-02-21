@@ -111,6 +111,36 @@ def _extract_detail(d: dict) -> dict:
     return detail
 
 
+def get_review_summary(app_id: str):
+    """轻量获取评测摘要（num_per_page=0），返回 {review_score, review_pct} 或 None
+    429 限速时返回 "rate_limited"。
+    """
+    url = (f"https://store.steampowered.com/appreviews/{app_id}"
+           f"?json=1&language=all&num_per_page=0&purchase_type=steam")
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "SteamNotesGen/6.0"})
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if data.get("success") != 1:
+            return None
+        qs = data.get("query_summary", {})
+        total = qs.get("total_reviews", 0)
+        if total <= 0:
+            return None
+        pos = qs.get("total_positive", 0)
+        return {
+            "review_score": qs.get("review_score", 0),
+            "review_pct": round(pos / total * 100),
+        }
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            return "rate_limited"
+        return None
+    except Exception:
+        return None
+
+
 def get_game_details_from_steam(app_id: str) -> dict:
     """通过 Steam Store API 获取游戏的详细信息（名称、开发商、类型、简介等）
 

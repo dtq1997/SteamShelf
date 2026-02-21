@@ -136,16 +136,16 @@ def build_ai_settings_ui(app):
         _on_provider_changed()
         model_var.set(t.get("model", ""))
 
-    tk.Button(tokens_btn_row, text="🗑️ 删除", font=("", 9), relief=tk.FLAT,
-              command=_delete_token).pack(side=tk.LEFT, padx=(0, 5))
-    tk.Button(tokens_btn_row, text="★ 设为默认", font=("", 9), relief=tk.FLAT,
-              command=_set_default).pack(side=tk.LEFT, padx=5)
-    tk.Button(tokens_btn_row, text="📝 加载到表单", font=("", 9), relief=tk.FLAT,
-              command=_load_to_form).pack(side=tk.LEFT, padx=5)
-    tk.Button(tokens_btn_row, text="▲", font=("", 9), relief=tk.FLAT,
-              command=lambda: _move_token(-1)).pack(side=tk.RIGHT, padx=1)
-    tk.Button(tokens_btn_row, text="▼", font=("", 9), relief=tk.FLAT,
-              command=lambda: _move_token(1)).pack(side=tk.RIGHT, padx=1)
+    ttk.Button(tokens_btn_row, text="🗑️ 删除", style="Toolbutton",
+               command=_delete_token).pack(side=tk.LEFT, padx=(0, 5))
+    ttk.Button(tokens_btn_row, text="★ 设为默认", style="Toolbutton",
+               command=_set_default).pack(side=tk.LEFT, padx=5)
+    ttk.Button(tokens_btn_row, text="📝 加载到表单", style="Toolbutton",
+               command=_load_to_form).pack(side=tk.LEFT, padx=5)
+    ttk.Button(tokens_btn_row, text="▲", style="Toolbutton",
+               command=lambda: _move_token(-1)).pack(side=tk.RIGHT, padx=1)
+    ttk.Button(tokens_btn_row, text="▼", style="Toolbutton",
+               command=lambda: _move_token(1)).pack(side=tk.RIGHT, padx=1)
 
     # ══════════ 左栏：令牌编辑表单 ══════════
     form_frame = tk.LabelFrame(left, text="➕ 添加 / 修改令牌", font=("", 10),
@@ -193,8 +193,8 @@ def build_ai_settings_ui(app):
         else:
             ai_key_entry.config(show="•")
             show_ai_btn.config(text="👁️")
-    show_ai_btn = tk.Button(form, text="👁️", font=("", 9), relief=tk.FLAT,
-                             command=toggle_show_ai)
+    show_ai_btn = ttk.Button(form, text="👁️", style="Toolbutton",
+                              command=toggle_show_ai)
     show_ai_btn.grid(row=row, column=2, padx=3)
     row += 1
 
@@ -347,9 +347,8 @@ def build_ai_settings_ui(app):
         for _k, (_v, _d) in _adv_vars.items():
             _v.set(_d)
 
-    tk.Button(adv_bottom, text="↩ 默认", font=("", 8),
-              relief=tk.FLAT, fg="#888", cursor="hand2",
-              command=_reset_adv_defaults).pack(side=tk.RIGHT)
+    ttk.Button(adv_bottom, text="↩ 默认", style="Toolbutton",
+               command=_reset_adv_defaults).pack(side=tk.RIGHT)
 
     # ── 关闭时保存高级参数 ──
     def _save_adv_and_close():

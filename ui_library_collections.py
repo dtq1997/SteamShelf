@@ -29,7 +29,7 @@
   ._type_filter: set                    — ui_library
   ._ALL_TYPES: tuple                    — ui_library
   ._img_coll_plus/minus/default         — ui_library
-  ._lib_view_btn: ttk.Button            — ui_library
+  ._viewing_collections: bool           — ui_library (查看状态跟踪)
 """
 
 import json
@@ -394,8 +394,11 @@ class LibraryCollectionsMixin:
         menu.add_command(label="➕ 新建空分类", command=self._lib_new_collection)
         menu.add_separator()
         menu.add_command(label="🤖 AI 智能筛选", command=self.ai_search_ui)
-        menu.add_command(label="⭐ 从推荐来源创建", command=self.personal_recommend_ui)
+        menu.add_command(label="⭐ 从推荐来源创建",
+            command=lambda: self.personal_recommend_ui(sources='recommend'))
         menu.add_command(label="🏆 从 Steam 列表页面创建", command=self.curator_sync_ui)
+        menu.add_command(label="📊 从 IGDB 数据库创建",
+            command=lambda: self.personal_recommend_ui(sources='igdb'))
         menu.add_command(label="📊 从 SteamDB 创建", command=self.steamdb_sync_ui)
         menu.add_separator()
         menu.add_command(label="📁 从文件导入", command=self.import_collection)
@@ -434,15 +437,8 @@ class LibraryCollectionsMixin:
         self._apply_coll_filters()
 
     def _update_view_btn_text(self):
-        """根据当前状态更新查看/还原按钮文本"""
-        if not self._viewing_collections:
-            self._lib_view_btn.config(text="📋\n查\n看")
-            return
-        sel = set(self._coll_tree.selection())
-        if not sel or sel == self._viewed_coll_ids:
-            self._lib_view_btn.config(text="↩️\n还\n原")
-        else:
-            self._lib_view_btn.config(text="📋\n查\n看")
+        """查看/还原状态跟踪（工具条已移除，保留方法避免调用方报错）"""
+        pass
 
     def _on_coll_double_click(self, event):
         """双击收藏夹：独占筛选（仅显示该分类的游戏），再次双击取消"""
@@ -494,6 +490,8 @@ class LibraryCollectionsMixin:
         """从筛选后的 app ID 集合构建游戏列表"""
         existing_games_map = {str(g.get('app_id', '')): g for g in self._lib_all_games_backup}
         games = []
+        _cef_cache = getattr(self, '_cef_unowned_cache', {})
+        _detail_cache = getattr(self, '_app_detail_cache', {})
         for aid in all_app_ids:
             aid_str = str(aid)
             name = (self._game_name_cache.get(aid_str)
@@ -515,10 +513,10 @@ class LibraryCollectionsMixin:
                 'owned': is_owned,
                 'type': app_type or 1,
             }
-            # 从 CEF 数据复制额外字段（评测/MC/发行/入库时间）
+            # 从 CEF / existing 数据复制额外字段（评测/MC/发行/入库时间）
             src = existing
             if not src:
-                src = getattr(self, '_cef_unowned_cache', {}).get(aid_str)
+                src = _cef_cache.get(aid_str)
             if src:
                 for k in ('review_pct', 'review_score', 'metacritic',
                           'rt_release', 'rt_purchased'):
@@ -526,10 +524,9 @@ class LibraryCollectionsMixin:
                     if v:
                         entry[k] = v
             # 回退：从 Store API 详情缓存补充 metacritic / release_date
-            detail = self._app_detail_cache.get(aid_str)
+            detail = _detail_cache.get(aid_str)
             if isinstance(detail, dict):
                 if detail.get('_removed'):
-                    # 下架游戏：名字加前缀标识
                     if name == f"AppID {aid}":
                         entry['name'] = f"🚫 AppID {aid}"
                     else:
@@ -538,6 +535,10 @@ class LibraryCollectionsMixin:
                     entry['metacritic'] = detail['metacritic']
                 if not entry.get('rt_release') and detail.get('release_date'):
                     entry['release_date_str'] = detail['release_date']
+                if not entry.get('review_score') and detail.get('review_score'):
+                    entry['review_score'] = detail['review_score']
+                if not entry.get('review_pct') and detail.get('review_pct'):
+                    entry['review_pct'] = detail['review_pct']
             games.append(entry)
         return games
 
@@ -1015,14 +1016,21 @@ class LibraryCollectionsMixin:
             menu.add_command(label="🤖 AI 智能筛选更新",
                 command=lambda tc=target_col: self.ai_search_ui(target_col=tc))
             menu.add_command(label="⭐ 从推荐来源更新",
-                command=lambda tc=target_col: self.personal_recommend_ui(target_col=tc))
+                command=lambda tc=target_col: self.personal_recommend_ui(target_col=tc, sources='recommend'))
             menu.add_command(label="🏆 从 Steam 列表页面更新",
                 command=lambda tc=target_col: self.curator_sync_ui(target_col=tc))
+            menu.add_command(label="📊 从 IGDB 数据库更新",
+                command=lambda tc=target_col: self.personal_recommend_ui(target_col=tc, sources='igdb'))
             menu.add_command(label="📊 从 SteamDB 更新",
                 command=lambda tc=target_col: self.steamdb_sync_ui(target_col=tc))
             menu.add_separator()
             menu.add_command(label="📁 从文件更新",
                 command=lambda tc=target_col: self.import_collection(target_col=tc))
+            menu.add_separator()
+            menu.add_command(label="📋 查看分类内容",
+                command=self._lib_toggle_view_collection)
+            menu.add_command(label="📤 导出分类",
+                command=self.export_static_collection)
 
         # 检查选中收藏夹是否有缓存来源
         if sel and len(sel) == 1 and self._collections_core:
@@ -1063,6 +1071,8 @@ class LibraryCollectionsMixin:
             menu.add_command(
                 label=f"📤 导出选中的 {len(sel)} 个分类",
                 command=self.export_static_collection)
+            menu.add_command(label="📋 查看分类内容",
+                command=self._lib_toggle_view_collection)
 
         # 一键更新所有有来源的收藏夹
         if self._collections_core:
@@ -1084,6 +1094,9 @@ class LibraryCollectionsMixin:
                 del_label = f"🗑️ 删除选中的 {len(sel)} 个分类"
             menu.add_command(label=del_label,
                              command=self._lib_delete_collection)
+
+        menu.add_separator()
+        menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
 
         self._smart_popup(menu, event.x_root, event.y_root)
 
@@ -1261,9 +1274,9 @@ class LibraryCollectionsMixin:
         self._col_vis_vars = {}
         toggleable = [
             ("notes", "📝 笔记数"), ("source", "AI信息"),
-            ("date", "最新笔记"), ("review", "评测"),
-            ("release", "发行日期"), ("acquired", "入库时间"),
-            ("metacritic", "MC分数"),
+            ("date", "最新笔记"), ("review_label", "评测等级"),
+            ("review", "好评%"), ("release", "发行日期"),
+            ("acquired", "入库时间"), ("metacritic", "MC分数"),
         ]
         for col_id, label in toggleable:
             var = tk.BooleanVar(value=col_id in self._visible_columns)
@@ -1308,7 +1321,8 @@ class LibraryCollectionsMixin:
 
         col_names = {"type": "Type", "appid": "AppID", "name": "游戏名称",
                      "notes": "📝", "source": "AI信息", "date": "最新笔记",
-                     "review": "评测", "release": "发行",
+                     "review_label": "评测", "review": "好评%",
+                     "release": "发行",
                      "acquired": "入库", "metacritic": "MC"}
         for c in col_names:
             text = col_names[c]
@@ -1316,7 +1330,7 @@ class LibraryCollectionsMixin:
                 arrow = " ↑" if self._sort_columns[c] == 'asc' else " ↓"
                 if len(self._sort_order) > 1:
                     priority = self._sort_order.index(c) + 1
-                    text = f"{col_names[c]} {arrow}{priority}"
+                    text = f"{col_names[c]}{arrow}{priority}"
                 else:
                     text = f"{col_names[c]}{arrow}"
             if c == "type" and len(self._type_filter) < len(self._ALL_TYPES):

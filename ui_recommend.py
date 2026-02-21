@@ -28,8 +28,13 @@ class RecommendMixin:
 
     # --- 个人推荐分类界面（Steam250 + 鉴赏家精选） ---
 
-    def personal_recommend_ui(self, target_col=None):
-        """个人推荐分类界面：Steam250 排行榜 + 鉴赏家精选"""
+    def personal_recommend_ui(self, target_col=None, sources='recommend'):
+        """个人推荐分类界面
+
+        Args:
+            target_col: (col_id, col_name) 更新目标，None=新建模式
+            sources: 'recommend'=Steam250+鉴赏家, 'igdb'=IGDB, 'all'=全部
+        """
         if not self._ensure_collections_core():
             return
         data = self._collections_core.load_json()
@@ -39,10 +44,16 @@ class RecommendMixin:
         fetched_data = {}  # key: source_key, value: {'ids': [...], 'name': '...'}
 
         rec_win = tk.Toplevel(self.root)
+        _titles = {
+            'recommend': "从推荐来源",
+            'igdb': "从 IGDB 数据库",
+            'all': "从推荐来源",
+        }
+        _base = _titles.get(sources, "从推荐来源")
         if target_col:
-            rec_win.title(f"从推荐来源更新「{target_col[1]}」")
+            rec_win.title(f"{_base}更新「{target_col[1]}」")
         else:
-            rec_win.title("从推荐来源获取")
+            rec_win.title(f"{_base}获取")
 
         # 使用指南
         guide_frame = tk.Frame(rec_win)
@@ -52,11 +63,18 @@ class RecommendMixin:
                              bg=rec_win.cget("bg"), relief="flat", wrap="word")
         guide_text.tag_config("red", foreground="red",
                               font=("微软雅黑", 9, "bold"))
-        guide_text.insert("end", "使用指南：\n1. 勾选要获取的来源（可多选），")
-        guide_text.insert("end", "勾选框后面的文字将成为收藏夹名称", "red")
-        guide_text.insert("end",
-            "。\n2. 直接点击下方的导入、导出或更新按钮，"
-            "程序会自动获取数据并执行操作。")
+        if sources == 'igdb':
+            guide_text.insert("end",
+                "使用指南：\n1. 在各维度标签页中勾选要获取的分类，")
+            guide_text.insert("end", "勾选框后面的文字将成为收藏夹名称", "red")
+            guide_text.insert("end",
+                "。\n2. 点击下方按钮执行操作。支持按类型/平台/主题/公司筛选。")
+        else:
+            guide_text.insert("end", "使用指南：\n1. 勾选要获取的来源（可多选），")
+            guide_text.insert("end", "勾选框后面的文字将成为收藏夹名称", "red")
+            guide_text.insert("end",
+                "。\n2. 直接点击下方的导入、导出或更新按钮，"
+                "程序会自动获取数据并执行操作。")
         guide_text.config(state="disabled")
         guide_text.pack(fill="x")
 
@@ -88,132 +106,34 @@ class RecommendMixin:
         check_vars = {}
         year_check_vars = {}
 
-        # ===== 主内容区：左右两栏布局 =====
+        # ===== 主内容区 =====
         main_content = tk.Frame(rec_win)
         main_content.pack(fill="both", expand=True, padx=10, pady=(5, 0))
 
-        left_col = tk.Frame(main_content)
-        left_col.pack(side="left", fill="y", padx=(10, 5), anchor="n")
-
-        right_col = tk.Frame(main_content)
-        right_col.pack(side="left", fill="both", expand=True, padx=(5, 10))
-
-        # ===== 左栏：Steam250 区域 =====
-        s250_frame = tk.LabelFrame(left_col, text="📊 Steam250 排行榜",
-                                    font=("微软雅黑", 10, "bold"),
-                                    padx=10, pady=5)
-        s250_frame.pack(fill="x", pady=(0, 5))
-
-        for key, src_type, url, name in steam250_fixed_sources:
-            var = tk.BooleanVar(value=False)
-            check_vars[key] = (var, src_type, url, name)
-            tk.Checkbutton(s250_frame, text=name, variable=var,
-                           font=("微软雅黑", 9)).pack(anchor="w")
-
-        # 年度榜单区域
-        year_frame = tk.Frame(s250_frame)
-        year_frame.pack(fill="x", pady=(5, 0))
-        tk.Label(year_frame, text="📅 年度榜单：",
-                 font=("微软雅黑", 9)).pack(side="left")
-
-        from datetime import datetime
-        current_year = datetime.now().year
-        available_years = list(range(current_year, current_year - 6, -1))
-
-        year_inner_frame = tk.Frame(year_frame)
-        year_inner_frame.pack(side="left", padx=(5, 0))
-
-        for year in available_years:
-            var = tk.BooleanVar(value=False)
-            key = f"steam250_{year}"
-            url = f"https://steam250.com/{year}"
-            name = f"前 250 优秀游戏（{year} 年度）"
-            year_check_vars[key] = (var, "steam250", url, name, year)
-            tk.Checkbutton(year_inner_frame, text=str(year), variable=var,
-                           font=("微软雅黑", 9)).pack(side="left")
-
-        # Steam250 全选按钮
-        select_all_frame = tk.Frame(s250_frame)
-        select_all_frame.pack(fill="x", pady=(5, 0))
-
-        def select_all_s250():
-            for k, v in check_vars.items():
-                if k.startswith("steam250"):
-                    v[0].set(True)
-            for k, v in year_check_vars.items():
-                v[0].set(True)
-
-        def deselect_all_s250():
-            for k, v in check_vars.items():
-                if k.startswith("steam250"):
-                    v[0].set(False)
-            for k, v in year_check_vars.items():
-                v[0].set(False)
-
-        tk.Button(select_all_frame, text="☑️ 全选 Steam250",
-                  command=select_all_s250,
-                  font=("微软雅黑", 8)).pack(side="left", padx=(0, 5))
-        tk.Button(select_all_frame, text="☐ 取消全选 Steam250",
-                  command=deselect_all_s250,
-                  font=("微软雅黑", 8)).pack(side="left")
-
-        # ===== 左栏：鉴赏家精选区域 =====
-        curator_frame = tk.LabelFrame(left_col, text="🎮 鉴赏家精选",
-                                       font=("微软雅黑", 10, "bold"),
-                                       padx=10, pady=5)
-        curator_frame.pack(fill="x", pady=5)
-
-        for key, src_type, url, name in curator_sources:
-            var = tk.BooleanVar(value=False)
-            check_vars[key] = (var, src_type, url, name)
-            tk.Checkbutton(curator_frame, text=name, variable=var,
-                           font=("微软雅黑", 9)).pack(anchor="w")
-
-        curator_btn_frame = tk.Frame(curator_frame)
-        curator_btn_frame.pack(fill="x", pady=(5, 0))
-
-        def select_all_curator():
-            for k, v in check_vars.items():
-                if k.startswith("curator"):
-                    v[0].set(True)
-
-        def deselect_all_curator():
-            for k, v in check_vars.items():
-                if k.startswith("curator"):
-                    v[0].set(False)
-
-        tk.Button(curator_btn_frame, text="☑️ 全选鉴赏家",
-                  command=select_all_curator,
-                  font=("微软雅黑", 8)).pack(side="left", padx=(0, 5))
-        tk.Button(curator_btn_frame, text="☐ 取消全选鉴赏家",
-                  command=deselect_all_curator,
-                  font=("微软雅黑", 8)).pack(side="left")
-
-        tk.Label(curator_frame,
-                 text="💡 鉴赏家列表会使用多语言扫描以获取完整数据",
-                 font=("微软雅黑", 8), fg="#666").pack(anchor="w", pady=(5, 0))
-
-        # Cookie 状态提示
-        cookie_status_frame = tk.Frame(curator_frame)
-        cookie_status_frame.pack(fill="x", pady=(3, 0))
-
-        saved_cookie = self._collections_core.get_saved_cookie()
-        if saved_cookie:
-            tk.Label(cookie_status_frame,
-                     text="🔐 已配置登录态 Cookie，可获取完整列表",
-                     font=("微软雅黑", 8), fg="green").pack(anchor="w")
+        left_col = right_col = None
+        if sources == 'igdb':
+            right_col = tk.Frame(main_content)
+            right_col.pack(fill="both", expand=True, padx=10)
+        elif sources == 'recommend':
+            left_col = tk.Frame(main_content)
+            left_col.pack(fill="both", expand=True, padx=10)
         else:
-            tk.Label(cookie_status_frame,
-                     text="⚠️ 未配置登录态 Cookie，可能无法获取完整列表",
-                     font=("微软雅黑", 8), fg="orange").pack(anchor="w")
-            tk.Label(cookie_status_frame,
-                     text="     → 可在主界面「🔑 管理登录态 Cookie」中配置",
-                     font=("微软雅黑", 8), fg="#888").pack(anchor="w")
+            left_col = tk.Frame(main_content)
+            left_col.pack(side="left", fill="y", padx=(10, 5), anchor="n")
+            right_col = tk.Frame(main_content)
+            right_col.pack(side="left", fill="both", expand=True, padx=(5, 10))
 
-        # ===== 右栏：IGDB 多维度分类区域（已拆分到 ui_recommend_igdb.py）=====
+        # ===== 左栏：Steam250 + 鉴赏家（sources != 'igdb' 时构建） =====
+        if left_col is not None:
+            self._build_recommend_left_col(
+                left_col, check_vars, year_check_vars,
+                steam250_fixed_sources, curator_sources)
+
+        # ===== 右栏：IGDB（sources != 'recommend' 时构建） =====
         igdb_state = IGDBState()
-        igdb_state.rec_win = rec_win
-        build_igdb_panel(self, igdb_state, right_col)
+        if right_col is not None:
+            igdb_state.rec_win = rec_win
+            build_igdb_panel(self, igdb_state, right_col)
 
         # ===== 状态显示 =====
         status_var = tk.StringVar(
@@ -236,13 +156,14 @@ class RecommendMixin:
         is_fetching = [False]
 
         # 将后期创建的 UI 组件绑定到 igdb_state，供 force_rescan_igdb 使用
-        igdb_state.ui_ctx.update({
-            'is_fetching': is_fetching,
-            'status_var': status_var,
-            'detail_var': detail_var,
-            'progress_bar': progress_bar,
-            'detail_label': detail_label,
-        })
+        if right_col is not None:
+            igdb_state.ui_ctx.update({
+                'is_fetching': is_fetching,
+                'status_var': status_var,
+                'detail_var': detail_var,
+                'progress_bar': progress_bar,
+                'detail_label': detail_label,
+            })
 
         # ===== 核心：获取数据并执行后续操作 =====
         def fetch_and_execute(action_type, action_callback):
@@ -428,10 +349,11 @@ class RecommendMixin:
                     for btn in btn_widgets:
                         btn.config(state="normal")
 
-                    try:
-                        refresh_igdb_cache_status(self, igdb_state)
-                    except Exception:
-                        pass
+                    if right_col is not None:
+                        try:
+                            refresh_igdb_cache_status(self, igdb_state)
+                        except Exception:
+                            pass
 
                     if fetched_data:
                         if merge_var.get() and len(fetched_data) > 1:
@@ -489,7 +411,8 @@ class RecommendMixin:
         btn_frame.pack(pady=15)
 
         btn_widgets = []
-        igdb_state.ui_ctx['btn_widgets'] = btn_widgets
+        if right_col is not None:
+            igdb_state.ui_ctx['btn_widgets'] = btn_widgets
 
         disclaimer = self._collections_core.disclaimer
 
@@ -583,12 +506,12 @@ class RecommendMixin:
 
                 btn_row = tk.Frame(name_win)
                 btn_row.pack(pady=15)
-                tk.Button(btn_row, text="✅ 确认创建",
-                          command=confirm_create,
-                          width=15).pack(side="left", padx=10)
-                tk.Button(btn_row, text="取消",
-                          command=name_win.destroy,
-                          width=10).pack(side="left", padx=10)
+                ttk.Button(btn_row, text="✅ 确认创建",
+                           command=confirm_create,
+                           width=15).pack(side="left", padx=10)
+                ttk.Button(btn_row, text="取消",
+                           command=name_win.destroy,
+                           width=10).pack(side="left", padx=10)
 
             fetch_and_execute('create', create_action)
 
@@ -717,12 +640,12 @@ class RecommendMixin:
 
                 fetch_and_execute('update', target_update_action)
 
-            btn_t = tk.Button(btn_frame, text="🔄 更新",
-                              command=do_target_update, width=10)
+            btn_t = ttk.Button(btn_frame, text="🔄 更新",
+                               command=do_target_update, width=10)
             btn_t.pack(side="left", padx=5)
             btn_widgets.append(btn_t)
-            btn_c = tk.Button(btn_frame, text="取消",
-                              command=rec_win.destroy, width=8)
+            btn_c = ttk.Button(btn_frame, text="取消",
+                               command=rec_win.destroy, width=8)
             btn_c.pack(side="left", padx=5)
             btn_widgets.append(btn_c)
         else:
@@ -736,19 +659,135 @@ class RecommendMixin:
             mode_combo.set("增量")
             mode_combo.pack(side="left")
 
-            btn1 = tk.Button(btn_frame, text="📁 建立为新收藏夹",
-                             command=do_create, width=15)
+            btn1 = ttk.Button(btn_frame, text="📁 建立为新收藏夹",
+                              command=do_create, width=15)
             btn1.pack(side="left", padx=5)
             btn_widgets.append(btn1)
 
-            btn2 = tk.Button(btn_frame, text="📥 导出为 TXT 文件",
-                             command=do_export, width=18)
+            btn2 = ttk.Button(btn_frame, text="📥 导出为 TXT 文件",
+                              command=do_export, width=18)
             btn2.pack(side="left", padx=5)
             btn_widgets.append(btn2)
 
-            btn3 = tk.Button(btn_frame, text="🔄️ 更新现有收藏夹",
-                             command=do_update, width=15)
+            btn3 = ttk.Button(btn_frame, text="🔄️ 更新现有收藏夹",
+                              command=do_update, width=15)
             btn3.pack(side="left", padx=5)
             btn_widgets.append(btn3)
 
         self._center_window(rec_win)
+
+    def _build_recommend_left_col(self, parent, check_vars, year_check_vars,
+                                   steam250_sources, curator_sources):
+        """构建推荐来源左栏：Steam250 排行榜 + 鉴赏家精选"""
+        # ── Steam250 区域 ──
+        s250_frame = tk.LabelFrame(parent, text="📊 Steam250 排行榜",
+                                    font=("微软雅黑", 10, "bold"),
+                                    padx=10, pady=5)
+        s250_frame.pack(fill="x", pady=(0, 5))
+
+        for key, src_type, url, name in steam250_sources:
+            var = tk.BooleanVar(value=False)
+            check_vars[key] = (var, src_type, url, name)
+            tk.Checkbutton(s250_frame, text=name, variable=var,
+                           font=("微软雅黑", 9)).pack(anchor="w")
+
+        # 年度榜单
+        self._build_s250_year_section(s250_frame, year_check_vars)
+
+        # 全选按钮
+        sel_frame = tk.Frame(s250_frame)
+        sel_frame.pack(fill="x", pady=(5, 0))
+
+        def sel_all():
+            for k, v in check_vars.items():
+                if k.startswith("steam250"):
+                    v[0].set(True)
+            for v in year_check_vars.values():
+                v[0].set(True)
+
+        def desel_all():
+            for k, v in check_vars.items():
+                if k.startswith("steam250"):
+                    v[0].set(False)
+            for v in year_check_vars.values():
+                v[0].set(False)
+
+        ttk.Button(sel_frame, text="☑️ 全选 Steam250",
+                   command=sel_all).pack(side="left", padx=(0, 5))
+        ttk.Button(sel_frame, text="☐ 取消全选",
+                   command=desel_all).pack(side="left")
+
+        # ── 鉴赏家精选区域 ──
+        self._build_curator_section(parent, check_vars, curator_sources)
+
+    @staticmethod
+    def _build_s250_year_section(parent, year_check_vars):
+        """Steam250 年度榜单勾选区"""
+        from datetime import datetime
+        year_frame = tk.Frame(parent)
+        year_frame.pack(fill="x", pady=(5, 0))
+        tk.Label(year_frame, text="📅 年度榜单：",
+                 font=("微软雅黑", 9)).pack(side="left")
+
+        inner = tk.Frame(year_frame)
+        inner.pack(side="left", padx=(5, 0))
+        current_year = datetime.now().year
+        for year in range(current_year, current_year - 6, -1):
+            var = tk.BooleanVar(value=False)
+            key = f"steam250_{year}"
+            url = f"https://steam250.com/{year}"
+            name = f"前 250 优秀游戏（{year} 年度）"
+            year_check_vars[key] = (var, "steam250", url, name, year)
+            tk.Checkbutton(inner, text=str(year), variable=var,
+                           font=("微软雅黑", 9)).pack(side="left")
+
+    def _build_curator_section(self, parent, check_vars, curator_sources):
+        """鉴赏家精选区域"""
+        curator_frame = tk.LabelFrame(parent, text="🎮 鉴赏家精选",
+                                       font=("微软雅黑", 10, "bold"),
+                                       padx=10, pady=5)
+        curator_frame.pack(fill="x", pady=5)
+
+        for key, src_type, url, name in curator_sources:
+            var = tk.BooleanVar(value=False)
+            check_vars[key] = (var, src_type, url, name)
+            tk.Checkbutton(curator_frame, text=name, variable=var,
+                           font=("微软雅黑", 9)).pack(anchor="w")
+
+        btn_frame = tk.Frame(curator_frame)
+        btn_frame.pack(fill="x", pady=(5, 0))
+
+        def sel_all():
+            for k, v in check_vars.items():
+                if k.startswith("curator"):
+                    v[0].set(True)
+
+        def desel_all():
+            for k, v in check_vars.items():
+                if k.startswith("curator"):
+                    v[0].set(False)
+
+        ttk.Button(btn_frame, text="☑️ 全选鉴赏家",
+                   command=sel_all).pack(side="left", padx=(0, 5))
+        ttk.Button(btn_frame, text="☐ 取消全选",
+                   command=desel_all).pack(side="left")
+
+        tk.Label(curator_frame,
+                 text="💡 鉴赏家列表会使用多语言扫描以获取完整数据",
+                 font=("微软雅黑", 8), fg="#666").pack(anchor="w", pady=(5, 0))
+
+        # Cookie 状态提示
+        cookie_frame = tk.Frame(curator_frame)
+        cookie_frame.pack(fill="x", pady=(3, 0))
+        saved_cookie = self._collections_core.get_saved_cookie()
+        if saved_cookie:
+            tk.Label(cookie_frame,
+                     text="🔐 已配置登录态 Cookie，可获取完整列表",
+                     font=("微软雅黑", 8), fg="green").pack(anchor="w")
+        else:
+            tk.Label(cookie_frame,
+                     text="⚠️ 未配置 Cookie，可能无法获取完整列表",
+                     font=("微软雅黑", 8), fg="orange").pack(anchor="w")
+            tk.Label(cookie_frame,
+                     text="     → 可在主界面「🔑 管理登录态 Cookie」中配置",
+                     font=("微软雅黑", 8), fg="#888").pack(anchor="w")

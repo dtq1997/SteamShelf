@@ -300,9 +300,8 @@ def build_cache_manager_ui(app):
             messagebox.showinfo("✅", "来源缓存已清除。",
                                 parent=cache_win)
 
-    tk.Button(row3c, text="查看", font=("", 8), relief=tk.FLAT,
-              fg="#4a90d9", cursor="hand2",
-              command=_view_sources).pack(side=tk.RIGHT, padx=(0, 3))
+    ttk.Button(row3c, text="查看", style="Toolbutton",
+               command=_view_sources).pack(side=tk.RIGHT, padx=(0, 3))
     ttk.Button(row3c, text="清除", width=5,
                command=_clear_sources).pack(side=tk.RIGHT)
 

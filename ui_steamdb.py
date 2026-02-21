@@ -246,18 +246,18 @@ class SteamDBMixin:
             mode_combo.set("增量")
             mode_combo.pack(side="left")
 
-            tk.Button(btn_frame, text="🔄 更新",
-                      command=do_target_update, width=10).pack(
-                          side="left", padx=5)
-            tk.Button(btn_frame, text="取消",
-                      command=db_win.destroy, width=8).pack(
-                          side="left", padx=5)
+            ttk.Button(btn_frame, text="🔄 更新",
+                       command=do_target_update, width=10).pack(
+                           side="left", padx=5)
+            ttk.Button(btn_frame, text="取消",
+                       command=db_win.destroy, width=8).pack(
+                           side="left", padx=5)
         else:
-            tk.Button(btn_frame, text="📁 建立为新收藏夹", command=do_create,
-                      width=15).pack(side="left", padx=5)
-            tk.Button(btn_frame, text="📥 导出为 TXT 文件", command=do_export_txt,
-                      width=18).pack(side="left", padx=5)
-            tk.Button(btn_frame, text="🔄️ 更新现有收藏夹", command=do_update,
-                      width=15).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="📁 建立为新收藏夹", command=do_create,
+                       width=15).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="📥 导出为 TXT 文件", command=do_export_txt,
+                       width=18).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="🔄️ 更新现有收藏夹", command=do_update,
+                       width=15).pack(side="left", padx=5)
 
         self._center_window(db_win)

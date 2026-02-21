@@ -43,12 +43,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         frame = tk.Frame(parent, padx=12, pady=8)
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # ── 主体：左 + 工具条 + 右（grid 布局） ──
+        # ── 主体：左 + 右（grid 布局） ──
         body = tk.Frame(frame)
         body.pack(fill=tk.BOTH, expand=True)
         body.columnconfigure(0, weight=1, minsize=220)
-        body.columnconfigure(1, weight=0)
-        body.columnconfigure(2, weight=3, minsize=300)
+        body.columnconfigure(1, weight=3, minsize=300)
         body.rowconfigure(0, weight=1)
 
         # 左侧：收藏夹 / 详情
@@ -107,38 +106,16 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                    command=self._show_create_collection_menu)
         self._create_coll_btn.pack(side=tk.LEFT)
 
-        # ── 中间：上下文工具条（竖排按钮分隔左右） ──
-        toolbar = tk.Frame(body)
-        toolbar.grid(row=0, column=1, sticky="ns", padx=0)
-
-        # 当前上下文：'coll' 或 'game'
+        # 上下文跟踪（选择事件仍需要）
         self._toolbar_context = 'game'
-
-        # 均匀分布按钮（每个按钮之间用弹性空间隔开）
-        self._ctx_label = None
 
         style = ttk.Style()
         style.configure("Filter.TCheckbutton", font=("微软雅黑", 8))
         style.configure("Filter.TRadiobutton", font=("微软雅黑", 8))
 
-        _tb = {"width": 1, "font": ("微软雅黑", 9), "relief": "groove", "bd": 1,
-               "cursor": "hand2", "bg": "#f0f0f0", "activebackground": "#ddd",
-               "takefocus": False}
-        btn_group = tk.Frame(toolbar)
-        btn_group.pack(pady=(62, 0))
-        tk.Button(btn_group, text="📤\n导\n出", command=self._ctx_export, **_tb
-                  ).pack(ipady=4, pady=(0, 1))
-        tk.Button(btn_group, text="🔄\n刷\n新", command=self._lib_refresh, **_tb
-                  ).pack(ipady=4, pady=(0, 1))
-        tk.Button(btn_group, text="🗑\n删\n除", command=self._ctx_delete, **_tb
-                  ).pack(ipady=4, pady=(0, 1))
-        self._lib_view_btn = tk.Button(btn_group, text="📋\n查\n看",
-                  command=self._lib_toggle_view_collection, **_tb)
-        self._lib_view_btn.pack(ipady=4)
-
         # 右侧：游戏列表
         right = tk.Frame(body)
-        right.grid(row=0, column=2, sticky="nsew")
+        right.grid(row=0, column=1, sticky="nsew")
 
         # 标题行 + 勾选筛选（同一行）
         title_frame = tk.Frame(right)
@@ -279,7 +256,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_tree = ttk.Treeview(
             lib_list_frame,
             columns=("type", "appid", "name", "notes", "source", "date",
-                     "review", "release", "acquired", "metacritic"),
+                     "review_label", "review", "release", "acquired", "metacritic"),
             show="tree headings", style="GameList.Treeview",
             selectmode="extended", height=20)
 
@@ -294,7 +271,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         # 设置表头，绑定排序函数（Type 列单击弹筛选，不排序）
         for col, text in [("type", "Type ▼"), ("appid", "AppID"), ("name", "游戏名称"),
                           ("notes", "📝"), ("source", "AI信息"), ("date", "最新笔记"),
-                          ("review", "评测"), ("release", "发行"),
+                          ("review_label", "评测"), ("review", "好评%"),
+                          ("release", "发行"),
                           ("acquired", "入库"), ("metacritic", "MC")]:
             if col == "type":
                 self._lib_tree.heading(col, text=text,
@@ -310,7 +288,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_tree.column("source", width=70, minwidth=50, stretch=False, anchor=tk.W)
         self._lib_tree.column("date", width=82, minwidth=70, stretch=False, anchor=tk.CENTER)
         # 新增信息列（默认隐藏，通过右键表头菜单切换）
-        self._lib_tree.column("review", width=95, minwidth=70, stretch=False, anchor=tk.W)
+        self._lib_tree.column("review_label", width=75, minwidth=55, stretch=False, anchor=tk.W)
+        self._lib_tree.column("review", width=50, minwidth=40, stretch=False, anchor=tk.CENTER)
         self._lib_tree.column("release", width=70, minwidth=55, stretch=False, anchor=tk.CENTER)
         self._lib_tree.column("acquired", width=70, minwidth=55, stretch=False, anchor=tk.CENTER)
         self._lib_tree.column("metacritic", width=35, minwidth=30, stretch=False, anchor=tk.CENTER)
@@ -319,16 +298,27 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._col_defaults = {
             "type": (40, 35), "appid": (60, 50), "name": (300, 200),
             "notes": (45, 35), "source": (70, 50), "date": (82, 70),
-            "review": (95, 70), "release": (70, 55),
-            "acquired": (70, 55), "metacritic": (35, 30),
+            "review_label": (75, 55), "review": (50, 40),
+            "release": (70, 55), "acquired": (70, 55), "metacritic": (35, 30),
         }
         _default_visible = {"type", "appid", "name", "notes", "source",
-                            "date", "review"}
+                            "date", "review_label", "review", "release"}
         saved = self._config.get("visible_columns")
-        self._visible_columns = set(saved) if saved else _default_visible
+        if saved:
+            self._visible_columns = set(saved)
+            # 一次性迁移 v2：补 release + review_label 列
+            if not self._config.get("_migrated_cols_v2"):
+                for col in ("release", "review_label"):
+                    if col not in self._visible_columns:
+                        self._visible_columns.add(col)
+                self._config["_migrated_cols_v2"] = True
+                self._config["visible_columns"] = list(self._visible_columns)
+                self._config_mgr.save()
+        else:
+            self._visible_columns = _default_visible
         # 隐藏不可见列
-        for c in ("review", "release", "acquired", "metacritic",
-                   "notes", "source", "date"):
+        for c in ("review_label", "review", "release", "acquired",
+                   "metacritic", "notes", "source", "date"):
             if c not in self._visible_columns:
                 self._lib_tree.column(c, width=0, minwidth=0, stretch=False)
         # 树列（展开箭头）— 窄且不可拖，与内容融为一体
@@ -543,7 +533,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 note_date = datetime.fromtimestamp(nts).strftime("%Y-%m-%d") if nts else ""
                 tree.insert(sel, tk.END, iid=f"{sel}::n::{nid}",
                             values=("", "", f"📄 {title}", "", "", note_date,
-                                    "", "", "", ""),
+                                    "", "", "", "", ""),
                             tags=("note_child",))
         except Exception:
             pass
@@ -723,16 +713,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         return notes_col, source_col
 
     def _format_info_cols(self, g):
-        """格式化信息列：评测、发行、入库、MC"""
-        review_pct = g.get('review_pct', 0)
+        """格式化信息列：评测等级、好评%、发行、入库、MC"""
         review_score = g.get('review_score', 0)
-        if review_score and review_pct:
-            label = self._REVIEW_LABELS.get(review_score, "")
-            review_col = f"{label} {review_pct}%" if label else f"{review_pct}%"
-        elif review_pct:
-            review_col = f"{review_pct}%"
-        else:
-            review_col = ""
+        review_pct = g.get('review_pct', 0)
+        label_col = self._REVIEW_LABELS.get(review_score, "") if review_score else ""
+        pct_col = f"{review_pct}%" if review_pct else ""
         rt_release = g.get('rt_release', 0)
         release_col = (datetime.fromtimestamp(rt_release).strftime("%Y-%m")
                        if rt_release else g.get('release_date_str', ''))
@@ -741,7 +726,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                         if rt_purchased else "")
         mc = g.get('metacritic', 0)
         mc_col = str(mc) if mc else ""
-        return review_col, release_col, acquired_col, mc_col
+        return label_col, pct_col, release_col, acquired_col, mc_col
 
     def _cache_sort_keys(self, aid, type_str, name, note_count, latest_ts, g):
         """预缓存排序键"""
@@ -752,6 +737,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             'notes': note_count,
             'source': self._ai_sort_data.get(aid, (0, 0, 0, 0)),
             'date': latest_ts,
+            'review_label': g.get('review_score', 0),
             'review': g.get('review_pct', 0),
             'release': g.get('rt_release', 0),
             'acquired': g.get('rt_purchased', 0),
@@ -800,7 +786,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         date_col = datetime.fromtimestamp(latest_ts).strftime("%Y-%m-%d") if latest_ts else ""
 
         # 新增信息列 + 排序键
-        review_col, release_col, acquired_col, mc_col = self._format_info_cols(g)
+        label_col, pct_col, release_col, acquired_col, mc_col = self._format_info_cols(g)
         self._cache_sort_keys(
             aid, type_str, name, note_count, latest_ts, g)
 
@@ -809,7 +795,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             tree.delete(aid)
         tree.insert("", tk.END, iid=aid,
                     values=(type_str, aid, display_name, notes_col, source_col,
-                            date_col, review_col, release_col, acquired_col, mc_col),
+                            date_col, label_col, pct_col, release_col,
+                            acquired_col, mc_col),
                     tags=(tag,))
 
         # 懒加载占位：有笔记时插入占位子节点（展开时才加载真实子节点）
@@ -819,7 +806,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 tree.delete(lazy_iid)
             tree.insert(aid, tk.END, iid=lazy_iid,
                         values=("", "", "⏳ 加载中...", "", "", "",
-                                "", "", "", ""),
+                                "", "", "", "", ""),
                         tags=("note_child",))
 
         # enriched 数据

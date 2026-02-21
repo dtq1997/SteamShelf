@@ -99,14 +99,11 @@ class InlineAIGenMixin:
         self._inline_action_frame = tk.Frame(container)
         self._inline_action_frame.pack(fill=tk.X)
 
+        self._web_search_mode = "local"  # "local" / "ai_web"
         self._inline_gen_btn = ttk.Button(
             self._inline_action_frame, text="🤖 AI 生成游戏说明",
-            command=self._inline_ai_generate)
+            command=self._show_ai_gen_menu)
         self._inline_gen_btn.pack(side=tk.LEFT)
-
-        ttk.Button(self._inline_action_frame, text="📝 提示词",
-                   command=self._open_prompt_editor, width=8
-                   ).pack(side=tk.LEFT, padx=(4, 0))
 
         self._inline_skip_existing_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
@@ -114,12 +111,6 @@ class InlineAIGenMixin:
             variable=self._inline_skip_existing_var,
             style="Filter.TCheckbutton"
         ).pack(side=tk.LEFT, padx=(10, 0))
-
-        self._web_search_mode = "local"  # "local" / "ai_web"
-        self._ws_mode_btn = ttk.Button(
-            self._inline_action_frame, text="🔍 本地",
-            command=self._show_ws_mode_menu, width=9)
-        self._ws_mode_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         # ── 控制按钮（操作行右侧，初始不 pack） ──
         # pack 顺序：collapse 先 pack(RIGHT) 到最右，stop 次之，pause 最左
@@ -133,28 +124,31 @@ class InlineAIGenMixin:
             self._inline_action_frame, text="⏸ 暂停", width=6,
             command=self._inline_ai_pause)
 
-    # ────────────────────── 联网搜索模式菜单 ──────────────────────
+    # ────────────────────── AI 生成弹出菜单 ──────────────────────
 
-    def _show_ws_mode_menu(self):
-        """弹出搜索模式选择菜单"""
+    def _show_ai_gen_menu(self):
+        """弹出 AI 生成菜单（提示词 + 搜索模式选择即生成）"""
         menu = tk.Menu(self.root, tearoff=0)
-        labels = {
-            "local": "📚 本地（Steam + Google）",
-            "ai_web": "🌐 AI联网（Anthropic搜索）",
-        }
-        btn_labels = {"local": "🔍 本地", "ai_web": "🔍 AI联网"}
-        for mode, label in labels.items():
+        menu.add_command(label="📝 提示词设置",
+                         command=self._open_prompt_editor)
+        menu.add_separator()
+        modes = [
+            ("local", "📚 本地搜索 + 生成"),
+            ("ai_web", "🌐 AI联网搜索 + 生成"),
+        ]
+        for mode, label in modes:
             prefix = "✓ " if mode == self._web_search_mode else "   "
             menu.add_command(
                 label=prefix + label,
-                command=lambda m=mode, bl=btn_labels: self._set_ws_mode(m, bl))
-        btn = self._ws_mode_btn
+                command=lambda m=mode: self._gen_with_mode(m))
+        btn = self._inline_gen_btn
         menu_h = menu.yposition("end") + 30
         menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() - menu_h)
 
-    def _set_ws_mode(self, mode, btn_labels):
+    def _gen_with_mode(self, mode):
+        """设置搜索模式并立即触发生成"""
         self._web_search_mode = mode
-        self._ws_mode_btn.config(text=btn_labels[mode])
+        self._inline_ai_generate()
 
     # ────────────────────── 日志 ──────────────────────
 

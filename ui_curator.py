@@ -56,25 +56,21 @@ class CuratorMixin:
             url_entry.delete(0, "end")
             url_entry.insert(0, url)
 
-        tk.Button(ex_frame, text="鉴赏家", fg="blue", relief="flat",
-                  font=("微软雅黑", 8),
-                  command=lambda: set_url(
-                      "https://store.steampowered.com/curator/44791597/")
-                  ).pack(side="left", padx=3)
-        tk.Button(ex_frame, text="发行商", fg="blue", relief="flat",
-                  font=("微软雅黑", 8),
-                  command=lambda: set_url(
-                      "https://store.steampowered.com/publisher/DevolverDigital")
-                  ).pack(side="left", padx=3)
-        tk.Button(ex_frame, text="开发商", fg="blue", relief="flat",
-                  font=("微软雅黑", 8),
-                  command=lambda: set_url(
-                      "https://store.steampowered.com/developer/Valve")
-                  ).pack(side="left", padx=3)
-        tk.Button(ex_frame, text="🌐 浏览器打开", fg="gray", relief="flat",
-                  font=("微软雅黑", 8),
-                  command=lambda: webbrowser.open(url_entry.get().strip())
-                  ).pack(side="right")
+        for _lbl, _url in [
+            ("鉴赏家", "https://store.steampowered.com/curator/44791597/"),
+            ("发行商", "https://store.steampowered.com/publisher/DevolverDigital"),
+            ("开发商", "https://store.steampowered.com/developer/Valve"),
+        ]:
+            lnk = tk.Label(ex_frame, text=_lbl, fg="#1a73e8",
+                            font=("微软雅黑", 8, "underline"), cursor="hand2")
+            lnk.pack(side="left", padx=3)
+            lnk.bind("<Button-1>", lambda e, u=_url: set_url(u))
+
+        open_lnk = tk.Label(ex_frame, text="🌐 浏览器打开", fg="gray",
+                             font=("微软雅黑", 8), cursor="hand2")
+        open_lnk.pack(side="right")
+        open_lnk.bind("<Button-1>",
+                       lambda e: webbrowser.open(url_entry.get().strip()))
 
         # ── 代理 + Cookie 状态提示（动态刷新） ──
         cap_frame = tk.Frame(cur_win)
@@ -437,22 +433,22 @@ class CuratorMixin:
         right_frame.pack(side="left", fill="y")
 
         if target_col:
-            update_btn = tk.Button(right_frame, text="🔄 更新",
-                                   command=do_target_update, width=16)
+            update_btn = ttk.Button(right_frame, text="🔄 更新",
+                                    command=do_target_update, width=16)
             update_btn.pack(fill="x", pady=2)
-            tk.Button(right_frame, text="取消",
-                      command=cur_win.destroy, width=16).pack(fill="x", pady=2)
+            ttk.Button(right_frame, text="取消",
+                       command=cur_win.destroy, width=16).pack(fill="x", pady=2)
         else:
-            btn1 = tk.Button(right_frame, text="📁 建立为新收藏夹",
-                             command=do_create, width=16)
+            btn1 = ttk.Button(right_frame, text="📁 建立为新收藏夹",
+                              command=do_create, width=16)
             btn1.pack(fill="x", pady=2)
             btn_widgets.append(btn1)
-            btn2 = tk.Button(right_frame, text="📥 导出为 TXT 文件",
-                             command=do_export, width=16)
+            btn2 = ttk.Button(right_frame, text="📥 导出为 TXT 文件",
+                              command=do_export, width=16)
             btn2.pack(fill="x", pady=2)
             btn_widgets.append(btn2)
-            btn3 = tk.Button(right_frame, text="🔄️ 更新现有收藏夹",
-                             command=do_update, width=16)
+            btn3 = ttk.Button(right_frame, text="🔄️ 更新现有收藏夹",
+                              command=do_update, width=16)
             btn3.pack(fill="x", pady=2)
             btn_widgets.append(btn3)
 

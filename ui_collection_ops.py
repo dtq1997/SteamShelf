@@ -226,8 +226,8 @@ class CollectionOpsMixin:
                  "含名称、分类、动态逻辑，可用于完整还原",
             command=export_structured_json, font=("微软雅黑", 9),
             width=36, height=3, justify="left").pack(padx=20, pady=(0, 5))
-        tk.Button(fmt_win, text="取消", command=fmt_win.destroy,
-                  font=("微软雅黑", 9), width=10).pack(pady=(0, 10))
+        ttk.Button(fmt_win, text="取消", command=fmt_win.destroy,
+                  width=10).pack(pady=(0, 10))
 
     def update_static_collection(self):
         """批量更新：选择来源格式（TXT 或 JSON），然后映射到目标分类"""
@@ -337,8 +337,8 @@ class CollectionOpsMixin:
             text="📦 从 JSON 文件更新\n使用结构化分类数据",
             command=update_from_json, font=("微软雅黑", 9),
             width=32, height=3, justify="left").pack(padx=20, pady=(0, 5))
-        tk.Button(fmt_win, text="取消", command=fmt_win.destroy,
-                  font=("微软雅黑", 9), width=10).pack(pady=(0, 10))
+        ttk.Button(fmt_win, text="取消", command=fmt_win.destroy,
+                  width=10).pack(pady=(0, 10))
 
     def open_friend_sync_ui(self):
         """批量同步 Steam 用户游戏库"""
@@ -384,12 +384,12 @@ class CollectionOpsMixin:
 
         btn_frame = tk.Frame(sync_win)
         btn_frame.pack(pady=20)
-        tk.Button(btn_frame, text="✨ 生成默认名称",
-                  command=generate_default_names,
-                  width=18, height=2).pack(side="left", padx=10)
-        tk.Button(btn_frame, text="开始导入",
-                  command=commit_import,
-                  width=18, height=2).pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="✨ 生成默认名称",
+                   command=generate_default_names,
+                   width=18).pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="开始导入",
+                   command=commit_import,
+                   width=18).pack(side="left", padx=10)
 
     def show_batch_update_mapping(self, data, all_cols, sources, on_done,
                                   parent_to_close=None,
@@ -565,9 +565,9 @@ class CollectionOpsMixin:
 
         btn_row = tk.Frame(up_win)
         btn_row.pack(pady=15)
-        tk.Button(btn_row, text="✅ 确认更新", command=confirm_update,
+        ttk.Button(btn_row, text="✅ 确认更新", command=confirm_update,
                   width=15).pack(side="left", padx=10)
-        tk.Button(btn_row, text="取消", command=up_win.destroy,
+        ttk.Button(btn_row, text="取消", command=up_win.destroy,
                   width=10).pack(side="left", padx=10)
 
     # ────────────────────── 账号分类一键导入 ──────────────────────

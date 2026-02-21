@@ -3,7 +3,7 @@
 import platform
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 from account_manager import SteamAccountScanner
 from ui_utils import bg_thread
@@ -48,8 +48,9 @@ class SteamToolboxIntro:
                  text="请确保:\n1. Steam 已安装并登录\n2. 至少有一个账号的 userdata 目录存在",
                  font=("微软雅黑", 10), justify="left").pack(padx=30, pady=10)
 
-        tk.Button(root, text="🔄 重新扫描", command=lambda: (root.destroy(), self.intro_ui()),
-                  font=("微软雅黑", 10)).pack(pady=20)
+        ttk.Button(root, text="🔄 重新扫描",
+                   command=lambda: (root.destroy(), self.intro_ui())
+                   ).pack(pady=20)
 
         root.update_idletasks()
         cw, ch = root.winfo_reqwidth(), root.winfo_reqheight()
@@ -348,13 +349,13 @@ class SteamToolboxIntro:
             root.destroy()
             self._launch_main(account)
 
-        cef_btn = tk.Button(btn_frame, text="☁️ 云同步模式启动（推荐）",
-                            command=launch_cef, font=("微软雅黑", 11, "bold"),
-                            width=22, state="normal" if has_cef else "disabled")
+        cef_btn = ttk.Button(btn_frame, text="☁️ 云同步模式启动（推荐）",
+                             command=launch_cef,
+                             width=22, state="normal" if has_cef else "disabled")
         cef_btn.pack(side="left", padx=8)
 
-        file_btn = tk.Button(btn_frame, text="📁 本地模式启动",
-                             command=launch_file, font=("微软雅黑", 10), width=14)
+        file_btn = ttk.Button(btn_frame, text="📁 本地模式启动",
+                              command=launch_file, width=14)
         file_btn.pack(side="left", padx=8)
 
         _poll_cancelled = [False]
@@ -367,8 +368,8 @@ class SteamToolboxIntro:
             file_btn.config(state="normal")
             listbox.config(state="normal")
 
-        cancel_btn = tk.Button(btn_frame, text="取消",
-                               command=_cancel_poll, font=("微软雅黑", 9))
+        cancel_btn = ttk.Button(btn_frame, text="取消",
+                                command=_cancel_poll)
 
 
         if not has_cef:
@@ -450,23 +451,23 @@ class SteamToolboxIntro:
 
             btn_frame2 = tk.Frame(win)
             btn_frame2.pack(pady=(0, 10))
-            tk.Button(btn_frame2, text="📋 复制到剪贴板",
-                      command=lambda: (win.clipboard_clear(), win.clipboard_append(text)),
-                      font=("微软雅黑", 9)).pack(side="left", padx=5)
-            tk.Button(btn_frame2, text="🔄 重新检测",
-                      command=lambda: (win.destroy(), _show_debug()),
-                      font=("微软雅黑", 9)).pack(side="left", padx=5)
-            tk.Button(btn_frame2, text="关闭", command=win.destroy,
-                      font=("微软雅黑", 9)).pack(side="left", padx=5)
+            ttk.Button(btn_frame2, text="📋 复制到剪贴板",
+                       command=lambda: (win.clipboard_clear(), win.clipboard_append(text))
+                       ).pack(side="left", padx=5)
+            ttk.Button(btn_frame2, text="🔄 重新检测",
+                       command=lambda: (win.destroy(), _show_debug())
+                       ).pack(side="left", padx=5)
+            ttk.Button(btn_frame2, text="关闭", command=win.destroy
+                       ).pack(side="left", padx=5)
 
         bottom_frame = tk.Frame(root)
         bottom_frame.pack(pady=(0, 10))
-        debug_btn = tk.Button(bottom_frame, text="🔧 诊断 CEF 连接",
-                              command=_show_debug, font=("微软雅黑", 8), fg="#666",
-                              state="normal" if has_cef else "disabled")
+        debug_btn = ttk.Button(bottom_frame, text="🔧 诊断 CEF 连接",
+                               command=_show_debug,
+                               state="normal" if has_cef else "disabled")
         debug_btn.pack()
-        refresh_btn = tk.Button(bottom_frame, text="🔄 刷新状态",
-                                command=_refresh_steam_status, font=("微软雅黑", 8), fg="#666")
+        refresh_btn = ttk.Button(bottom_frame, text="🔄 刷新状态",
+                                 command=_refresh_steam_status)
         refresh_btn.pack(pady=(3, 0))
 
         root.update_idletasks()

@@ -51,15 +51,13 @@ class SteamRichTextEditor(tk.Frame):
                 ttk.Separator(toolbar, orient=tk.VERTICAL).pack(
                     side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
                 continue
-            btn = tk.Button(toolbar, text=label, font=("", 9),
-                            relief=tk.FLAT, bg="#e8e8e8", padx=4, pady=1,
-                            command=lambda t=tag: self._apply_tag(t))
+            btn = ttk.Button(toolbar, text=label, style="Toolbutton",
+                             command=lambda t=tag: self._apply_tag(t))
             btn.pack(side=tk.LEFT, padx=1)
 
         # 源码模式切换
-        self._mode_btn = tk.Button(toolbar, text="📝 源码", font=("", 9),
-                                    relief=tk.FLAT, bg="#e8e8e8", padx=6, pady=1,
-                                    command=self._toggle_source_mode)
+        self._mode_btn = ttk.Button(toolbar, text="📝 源码", style="Toolbutton",
+                                     command=self._toggle_source_mode)
         self._mode_btn.pack(side=tk.RIGHT, padx=5)
 
         self._mode_label = tk.Label(toolbar, text="可视模式", font=("", 8),

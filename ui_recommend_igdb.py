@@ -79,17 +79,16 @@ def build_igdb_panel(app, state, parent_frame):
     igdb_btn_frame = tk.Frame(igdb_frame)
     igdb_btn_frame.pack(fill="x", pady=(5, 0))
 
-    tk.Button(igdb_btn_frame, text="☑\ufe0f 全选当前页",
-              command=lambda: select_all_igdb(app, state),
-              font=("微软雅黑", 8)).pack(side="left", padx=(0, 5))
-    tk.Button(igdb_btn_frame, text="☐ 取消全选当前页",
-              command=lambda: deselect_all_igdb(app, state),
-              font=("微软雅黑", 8)).pack(side="left", padx=(0, 5))
-    tk.Button(igdb_btn_frame, text="🔄 重新下载 IGDB 数据",
-              command=lambda: force_rescan_igdb(app, state),
-              font=("微软雅黑", 8),
-              state="normal" if state.configured else "disabled"
-              ).pack(side="left")
+    ttk.Button(igdb_btn_frame, text="☑\ufe0f 全选当前页",
+               command=lambda: select_all_igdb(app, state),
+               ).pack(side="left", padx=(0, 5))
+    ttk.Button(igdb_btn_frame, text="☐ 取消全选当前页",
+               command=lambda: deselect_all_igdb(app, state),
+               ).pack(side="left", padx=(0, 5))
+    ttk.Button(igdb_btn_frame, text="🔄 重新下载 IGDB 数据",
+               command=lambda: force_rescan_igdb(app, state),
+               state="normal" if state.configured else "disabled"
+               ).pack(side="left")
 
     # 缓存状态信息
     igdb_cache_var = tk.StringVar()
@@ -389,8 +388,8 @@ def _build_company_tab(app, state):
 
         threading.Thread(target=bg_thread(search_thread), daemon=True).start()
 
-    company_search_btn = tk.Button(company_search_frame, text="搜索",
-        command=do_search_company, font=("微软雅黑", 8),
+    company_search_btn = ttk.Button(company_search_frame, text="搜索",
+        command=do_search_company,
         state="normal" if state.configured else "disabled")
     company_search_btn.pack(side="left")
 

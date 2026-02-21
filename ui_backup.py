@@ -89,9 +89,8 @@ class BackupMixin:
                 messagebox.showerror("错误", "❌ 备份创建失败。",
                                      parent=bk_win)
 
-        tk.Button(manual_frame, text="💾 立即创建备份",
-                  command=do_manual_backup,
-                  font=("微软雅黑", 9)).pack(side="left", padx=10)
+        ttk.Button(manual_frame, text="💾 立即创建备份",
+                   command=do_manual_backup).pack(side="left", padx=10)
 
         # 备份列表
         list_frame = tk.LabelFrame(bk_win, text="📚 备份历史",
@@ -185,14 +184,14 @@ class BackupMixin:
                     messagebox.showerror("错误", "❌ 删除失败。",
                                          parent=bk_win)
 
-        tk.Button(btn_frame, text="🔍 查看差异", command=do_view_diff,
-                  width=12, font=("微软雅黑", 9)).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="⏪ 恢复此备份", command=do_restore,
-                  width=12, font=("微软雅黑", 9)).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="🗑 删除备份", command=do_delete,
-                  width=12, font=("微软雅黑", 9)).pack(side="left", padx=5)
-        tk.Button(btn_frame, text="🔄 刷新列表", command=refresh_backup_list,
-                  width=12, font=("微软雅黑", 9)).pack(side="right", padx=5)
+        ttk.Button(btn_frame, text="🔍 查看差异", command=do_view_diff,
+                  width=12).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="⏪ 恢复此备份", command=do_restore,
+                  width=12).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="🗑 删除备份", command=do_delete,
+                  width=12).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="🔄 刷新列表", command=refresh_backup_list,
+                  width=12).pack(side="right", padx=5)
 
     def _show_diff_window(self, backup_filename):
         """显示备份与当前文件的差异详情"""
@@ -361,5 +360,5 @@ class BackupMixin:
             unchanged_text.config(state="disabled")
 
         # 关闭按钮
-        tk.Button(diff_win, text="关闭", command=diff_win.destroy,
+        ttk.Button(diff_win, text="关闭", command=diff_win.destroy,
                   width=10).pack(pady=10)
