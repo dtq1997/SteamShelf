@@ -146,6 +146,40 @@ def bg_thread(fn):
     return wrapper
 
 
+class AutoScrollbar(tk.Scrollbar):
+    """内容溢出时自动显示、不溢出时自动隐藏的滚动条。
+
+    必须使用 grid 布局。macOS aqua 下自动强制经典渲染器以确保可见。
+
+    用法::
+
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        tree.grid(row=0, column=0, sticky="nsew")
+        sb = AutoScrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+        sb.grid(row=0, column=1, sticky="ns")
+        tree.config(yscrollcommand=sb.set)
+    """
+
+    _AQUA_DEFAULTS = dict(
+        width=14, bg="#c8c8c8", troughcolor="#f0f0f0",
+        activebackground="#a0a0a0", highlightthickness=0,
+    )
+
+    def __init__(self, master=None, **kw):
+        if master and master.tk.call("tk", "windowingsystem") == "aqua":
+            for k, v in self._AQUA_DEFAULTS.items():
+                kw.setdefault(k, v)
+        super().__init__(master, **kw)
+
+    def set(self, lo, hi):
+        if float(lo) <= 0.0 and float(hi) >= 1.0:
+            self.grid_remove()
+        else:
+            self.grid()
+        super().set(lo, hi)
+
+
 class ProgressWindow:
     """可复用的进度窗口（线程安全）
 

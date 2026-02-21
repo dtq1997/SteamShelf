@@ -16,7 +16,7 @@ import time
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, ttk
-from ui_utils import bg_thread
+from ui_utils import AutoScrollbar, bg_thread
 
 from account_manager import SteamAccountScanner
 from ui_library_collections import LibraryCollectionsMixin
@@ -74,11 +74,13 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         coll_frame = tk.Frame(left)
         coll_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
+        coll_frame.columnconfigure(0, weight=1)
+        coll_frame.rowconfigure(0, weight=1)
         self._coll_tree = ttk.Treeview(coll_frame, show="tree", height=12, selectmode="extended")
-        self._coll_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        coll_scroll = tk.Scrollbar(coll_frame, orient=tk.VERTICAL,
-                                    command=self._coll_tree.yview)
-        coll_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._coll_tree.grid(row=0, column=0, sticky="nsew")
+        coll_scroll = AutoScrollbar(coll_frame, orient=tk.VERTICAL,
+                                     command=self._coll_tree.yview)
+        coll_scroll.grid(row=0, column=1, sticky="ns")
         self._coll_tree.config(yscrollcommand=coll_scroll.set)
 
         # 三态筛选图标（○ 默认 / ＋ 包含 / － 排除）
@@ -249,6 +251,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         # ── Treeview（统一游戏列表） ──
         lib_list_frame = tk.Frame(right)
         lib_list_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        lib_list_frame.columnconfigure(0, weight=1)
+        lib_list_frame.rowconfigure(0, weight=1)
 
         style = ttk.Style()
         style.configure("GameList.Treeview", rowheight=24, font=("微软雅黑", 9))
@@ -335,11 +339,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_tree.tag_configure("note_child", foreground="#666")
         self._lib_tree.tag_configure("partial_select", background="#e8f0fe")
 
-        self._lib_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._lib_tree.grid(row=0, column=0, sticky="nsew")
 
-        lib_scroll = tk.Scrollbar(lib_list_frame, orient=tk.VERTICAL,
-                                   command=self._lib_tree.yview)
-        lib_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        lib_scroll = AutoScrollbar(lib_list_frame, orient=tk.VERTICAL,
+                                    command=self._lib_tree.yview)
+        lib_scroll.grid(row=0, column=1, sticky="ns")
         self._lib_tree.config(yscrollcommand=lib_scroll.set)
 
         # 统一 Button-1 处理：分隔线拦截 + 表头排序 + 展开箭头
