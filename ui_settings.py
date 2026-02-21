@@ -103,6 +103,16 @@ class SettingsMixin:
         tk.Label(maint_row, text="笔记去重、日期补充、DLC 清理等",
                  font=("", 9), fg="#666").pack(side=tk.LEFT, padx=(8, 0))
 
+        ttk.Separator(frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=6)
+
+        upd_row = tk.Frame(frame)
+        upd_row.pack(fill=tk.X, pady=3)
+        ttk.Button(upd_row, text="🔔 检查更新", width=12,
+                   command=lambda: self._check_update_bg(manual=True, parent=win)).pack(side=tk.LEFT)
+        import updater
+        tk.Label(upd_row, text=f"当前版本: v{updater.__version__}",
+                 font=("", 9), fg="#666").pack(side=tk.LEFT, padx=(8, 0))
+
         ttk.Button(win, text="关闭", command=win.destroy).pack(pady=(10, 15))
         self._center_window(win)
 
@@ -117,6 +127,9 @@ class SettingsMixin:
                          command=self._ui_strip_collection_prefixes)
         menu.add_command(label="🧹 清理分类中的 DLC",
                          command=self._cleanup_dlc_from_collections)
+        menu.add_separator()
+        menu.add_command(label="✅ 标记选中笔记为已同步（慎用）",
+                         command=self._mark_synced_selected)
 
         btn = self._maint_btn
         x = btn.winfo_rootx()
@@ -316,11 +329,12 @@ class SettingsMixin:
 
     def _ui_show_about(self):
         """弹出关于作者窗口"""
+        import updater
         about = tk.Toplevel(self.root)
         about.title("关于")
         about.resizable(False, False)
 
-        tk.Label(about, text="SteamShelf v5.7.2",
+        tk.Label(about, text=f"SteamShelf v{updater.__version__}",
                  font=("", 12, "bold")).pack(padx=20, pady=(15, 8))
 
         info_frame = tk.Frame(about)

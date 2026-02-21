@@ -390,6 +390,9 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         # 焦点指示器（模拟 Windows 虚线框）
         self._lib_tree.tag_configure("focused_row",
             background="#d0e4f7")
+        # 有自身背景色的 tag，focused_row 不应覆盖
+        self._bg_tags = {"dirty", "not_owned", "uploading", "insufficient",
+                         "partial_select"}
         self._focused_iid = None
         self._lib_tree.bind("<<TreeviewSelect>>",
             self._update_focus_indicator, add=True)
@@ -654,13 +657,14 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 tree.item(old_iid, tags=tuple(tags))
             except Exception:
                 pass
-        # 添加新标签
+        # 添加新标签（跳过已有背景色 tag 的项，避免覆盖 dirty 等视觉标记）
         if new_iid:
             try:
                 tags = list(tree.item(new_iid, "tags"))
-                if "focused_row" not in tags:
-                    tags.append("focused_row")
-                tree.item(new_iid, tags=tuple(tags))
+                if not (self._bg_tags & set(tags)):
+                    if "focused_row" not in tags:
+                        tags.append("focused_row")
+                    tree.item(new_iid, tags=tuple(tags))
             except Exception:
                 pass
         self._focused_iid = new_iid

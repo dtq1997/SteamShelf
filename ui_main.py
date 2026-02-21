@@ -41,6 +41,7 @@ from ui_steamdb import SteamDBMixin
 from ui_backup import BackupMixin
 from ui_ai_inline_gen import InlineAIGenMixin
 from ui_ai_search import AISearchMixin
+from ui_updater import UpdaterMixin
 from ui_intro import SteamToolboxIntro
 
 from steam_data import get_game_name_from_steam, get_app_name_and_type, get_review_summary
@@ -59,7 +60,7 @@ class SteamToolboxMain(
     InlineAIGenMixin, AISearchMixin,
     ImportExportMixin, SettingsMixin,
     CollectionOpsMixin, CuratorMixin, RecommendMixin,
-    SteamDBMixin, BackupMixin
+    SteamDBMixin, BackupMixin, UpdaterMixin
 ):
     """
     SteamShelf 主界面（标签页版本）
@@ -352,6 +353,11 @@ class SteamToolboxMain(
         ttk.Button(acc_frame, text="⚙️ 设置", width=7,
                    command=self._open_unified_settings).pack(side=tk.RIGHT, padx=2)
 
+        # 更新提示标签（初始隐藏，有更新时显示）
+        self._update_label = tk.Label(
+            acc_frame, text="", font=("", 8, "bold"),
+            bg="#4a90d9", fg="#ffeb3b")
+
         # ── 全局：预加载游戏名称缓存（两个标签页共享） ──
         # 先同步加载持久化缓存（瞬时完成），确保两个标签页都能立刻使用
         self._ensure_game_name_cache_fast()
@@ -371,6 +377,11 @@ class SteamToolboxMain(
             self.root.after(0, self._apply_cef_bridge)
         else:
             self.root.after(500, self._auto_connect_cef)
+
+        # 自动更新：清理残留 + 后台检查
+        import updater
+        updater.cleanup_update()
+        self.root.after(2000, self._check_update_bg)
 
         # 窗口关闭时检查未保存的收藏夹更改 + 未上传笔记
         def _on_close():
@@ -1080,8 +1091,6 @@ class SteamToolboxMain(
                 menu.add_separator()
                 menu.add_command(label="☁️ 上传到 Steam Cloud",
                                  command=lambda: self._cloud_upload_single(aid))
-                menu.add_command(label="✅ 标记为已同步",
-                                 command=lambda: self._mark_synced_selected())
         else:
             menu.add_command(label=f"📤 导出 ({len(app_ids)} 个游戏)",
                              command=self._ui_export_dialog)
@@ -1090,8 +1099,6 @@ class SteamToolboxMain(
             if dirty_n > 0:
                 menu.add_command(label=f"☁️ 上传选中的改动",
                                  command=self._cloud_upload_selected)
-                menu.add_command(label=f"✅ 标记选中为已同步",
-                                 command=self._mark_synced_selected)
         # 展开/收起
         menu.add_separator()
         menu.add_command(label="📝 新建笔记", command=self._ui_create_note)

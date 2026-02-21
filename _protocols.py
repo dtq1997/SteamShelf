@@ -217,6 +217,14 @@ class BackupHost(Protocol):
 
 
 @runtime_checkable
+class UpdaterHost(Protocol):
+    """ui_updater.py — UpdaterMixin 所需宿主属性"""
+    root: tk.Tk
+    _update_label: tk.Label
+    def _center_window(self, win: tk.Toplevel) -> None: ...
+
+
+@runtime_checkable
 class LibraryHost(Protocol):
     """ui_library.py — LibraryMixin 所需宿主属性"""
     root: tk.Tk
