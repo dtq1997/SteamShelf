@@ -132,15 +132,17 @@ class InlineAIGenMixin:
         menu.add_command(label="📝 提示词设置",
                          command=self._open_prompt_editor)
         menu.add_separator()
-        modes = [
-            ("local", "📚 本地搜索 + 生成"),
-            ("ai_web", "🌐 AI联网搜索 + 生成"),
-        ]
-        for mode, label in modes:
-            prefix = "✓ " if mode == self._web_search_mode else "   "
-            menu.add_command(
-                label=prefix + label,
-                command=lambda m=mode: self._gen_with_mode(m))
+        menu.add_command(
+            label="📚 开始用本地知识生成",
+            command=lambda: self._gen_with_mode("local"))
+        menu.add_command(label="     基于 AI 训练数据 + Steam 评测",
+                         state="disabled")
+        menu.add_separator()
+        menu.add_command(
+            label="🌐 开始用联网搜索生成",
+            command=lambda: self._gen_with_mode("ai_web"))
+        menu.add_command(label="     AI 自主搜索互联网获取最新信息",
+                         state="disabled")
         btn = self._inline_gen_btn
         menu_h = menu.yposition("end") + 30
         menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() - menu_h)
