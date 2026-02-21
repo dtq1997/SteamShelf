@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.7.2"
+__version__ = "5.8.0"
 
 UPDATE_SOURCES = [
     "https://gitee.com/dtq1997/SteamShelf/releases/download/latest/version.json",
