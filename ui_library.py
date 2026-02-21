@@ -365,6 +365,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                         self._lib_tree.focus(item)
                         is_open = self._lib_tree.item(item, 'open')
                         self._lib_tree.item(item, open=not is_open)
+                        if not is_open:
+                            self._on_tree_open()
                         return "break"
 
             # 记录拖动起始项（用于 B1-Motion 拖动多选）
