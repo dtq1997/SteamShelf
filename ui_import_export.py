@@ -102,9 +102,10 @@ class ImportExportMixin:
                 if aid not in partial_note_ids or partial_note_ids[aid] is not None:
                     partial_note_ids.setdefault(aid, set()).add(nid)
             else:
-                # 游戏行：标记为导出全部笔记
+                # 游戏行：使用当前筛选条件决定导出哪些笔记
                 aid = self._iid_to_app_id(iid)
-                partial_note_ids[aid] = None
+                visible = self._get_visible_note_ids(aid)
+                partial_note_ids[aid] = visible
 
         aids = list(partial_note_ids.keys())
         if not aids:

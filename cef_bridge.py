@@ -1433,7 +1433,7 @@ class CEFBridge:
                 extra.review_pct = app.review_percentage_without_bombs || 0;
                 extra.review_score = app.review_score_without_bombs || 0;
                 extra.metacritic = app.metacritic_score || 0;
-                extra.rt_release = app.rt_original_release_date || 0;
+                extra.rt_release = app.rt_original_release_date || app.rt_steam_release_date || 0;
                 extra.rt_purchased = app.rt_purchased_time || 0;
             }}
 
@@ -1489,7 +1489,7 @@ class CEFBridge:
                 review_pct: app.review_percentage_without_bombs || 0,
                 review_score: app.review_score_without_bombs || 0,
                 metacritic: app.metacritic_score || 0,
-                rt_release: app.rt_original_release_date || 0,
+                rt_release: app.rt_original_release_date || app.rt_steam_release_date || 0,
                 rt_purchased: app.rt_purchased_time || 0
             }};
         }}

@@ -133,15 +133,15 @@ class InlineAIGenMixin:
                          command=self._open_prompt_editor)
         menu.add_separator()
         menu.add_command(
-            label="📚 开始用本地知识生成",
+            label="📚 通用搜索生成",
             command=lambda: self._gen_with_mode("local"))
-        menu.add_command(label="     基于 AI 训练数据 + Steam 评测",
+        menu.add_command(label="     程序代为搜索网页，兼容所有模型（可能需代理）",
                          state="disabled")
         menu.add_separator()
         menu.add_command(
-            label="🌐 开始用联网搜索生成",
+            label="🌐 AI 工具搜索生成",
             command=lambda: self._gen_with_mode("ai_web"))
-        menu.add_command(label="     AI 自主搜索互联网获取最新信息",
+        menu.add_command(label="     使用 AI 自带搜索工具（更稳定，需模型支持）",
                          state="disabled")
         btn = self._inline_gen_btn
         menu_h = menu.yposition("end") + 30

@@ -295,7 +295,7 @@ def build_ai_settings_ui(app):
     _adv_fields = [
         ("web_search_max_uses", "搜索次数上限",
          SteamAIGenerator.DEFAULT_WEB_SEARCH_MAX_USES,
-         "每次生成最多搜几次 (1-10)"),
+         "两种搜索模式通用，每次生成最多搜几次 (1-10)"),
         ("thinking_budget", "思维预算",
          SteamAIGenerator.DEFAULT_THINKING_BUDGET,
          "thinking 模型内部推理的 token 预算"),
@@ -313,7 +313,7 @@ def build_ai_settings_ui(app):
          "普通请求的超时时间"),
         ("timeout_web_search", "搜索超时(秒)",
          SteamAIGenerator.DEFAULT_TIMEOUT_WEB_SEARCH,
-         "联网搜索的超时时间"),
+         "两种搜索模式通用的超时时间"),
     ]
 
     for ar, (key, label, default, tip) in enumerate(_adv_fields):
@@ -326,12 +326,12 @@ def build_ai_settings_ui(app):
                         to=99999, width=6, font=("", 9))
         sp.grid(row=ar, column=1, sticky=tk.W, padx=(6, 0), pady=1)
 
-    adv_bottom = tk.Frame(adv_frame)
-    adv_bottom.pack(fill=tk.X, pady=(2, 0))
-
-    _adv_tip_label = tk.Label(adv_bottom, text="悬停标签查看说明",
-                               font=("", 8), fg="#999", anchor=tk.W)
-    _adv_tip_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    _adv_tip_label = tk.Label(adv_frame, text="悬停标签查看说明",
+                               font=("", 8), fg="#999", anchor=tk.W,
+                               justify=tk.LEFT)
+    _adv_tip_label.pack(fill=tk.X, pady=(4, 0))
+    _adv_tip_label.bind("<Configure>",
+        lambda e: e.widget.config(wraplength=max(e.width - 4, 50)))
 
     for child in adv_grid.winfo_children():
         if hasattr(child, '_tip_text'):
@@ -349,7 +349,9 @@ def build_ai_settings_ui(app):
         for _k, (_v, _d) in _adv_vars.items():
             _v.set(_d)
 
-    ttk.Button(adv_bottom, text="↩ 默认", style="Toolbutton",
+    adv_btn_row = tk.Frame(adv_frame)
+    adv_btn_row.pack(fill=tk.X, side=tk.BOTTOM)
+    ttk.Button(adv_btn_row, text="↩ 恢复默认",
                command=_reset_adv_defaults).pack(side=tk.RIGHT)
 
     # ── 关闭时保存高级参数 ──

@@ -406,23 +406,44 @@ class NotesViewerMixin:
 
     # ────────────────────── 删除笔记 ──────────────────────
 
+    def _resolve_app_filtered_notes(self, app_id):
+        """解析单个游戏在当前筛选下的笔记，返回 (filtered_notes, nid_list_or_None)"""
+        all_notes = self.manager.read_notes(app_id).get("notes", [])
+        if not all_notes:
+            return [], None
+        visible_ids = self._get_visible_note_ids(app_id)
+        if visible_ids is not None:
+            filtered = [n for n in all_notes if n.get("id") in visible_ids]
+            return filtered, [n["id"] for n in filtered]
+        return all_notes, None
+
+    def _filter_uploading_apps(self, app_ids):
+        """过滤掉上传中的游戏，弹出警告，返回可操作的 app_ids"""
+        uploading = [a for a in app_ids if self.is_app_uploading(a)]
+        if not uploading:
+            return app_ids
+        names = ", ".join(self._get_game_name(a) for a in uploading[:5])
+        if len(uploading) > 5:
+            names += f" 等 {len(uploading)} 个"
+        messagebox.showwarning("☁️⬆ 上传中",
+            f"以下游戏的笔记正在上传到 Steam Cloud，无法删除：\n{names}\n\n"
+            "请等待上传完成后再操作。", parent=self.root)
+        return [a for a in app_ids if a not in set(uploading)]
+
+    def _do_delete_filtered(self, aid, nids):
+        """执行删除：nids=None 删全部，否则按 ID 删"""
+        if nids is not None:
+            self.manager.delete_notes_by_ids(aid, nids)
+        else:
+            self.manager.delete_all_notes(aid)
+
     def _ui_delete_notes(self):
         app_ids = self._get_selected_app_ids()
-        # 拦截上传中的笔记
         if app_ids:
-            uploading = [a for a in app_ids if self.is_app_uploading(a)]
-            if uploading:
-                names = ", ".join(self._get_game_name(a) for a in uploading[:5])
-                if len(uploading) > 5:
-                    names += f" 等 {len(uploading)} 个"
-                messagebox.showwarning("☁️⬆ 上传中",
-                    f"以下游戏的笔记正在上传到 Steam Cloud，无法删除：\n{names}\n\n"
-                    "请等待上传完成后再操作。", parent=self.root)
-                app_ids = [a for a in app_ids if a not in uploading]
-                if not app_ids:
-                    return
+            app_ids = self._filter_uploading_apps(app_ids)
+            if not app_ids:
+                return
         if not app_ids:
-            # 无选中项时弹出手动输入
             app_id = simpledialog.askstring("删除笔记", "请输入游戏 AppID:",
                                             parent=self.root)
             if app_id and app_id.strip():
@@ -431,39 +452,43 @@ class NotesViewerMixin:
                 return
 
         if len(app_ids) == 1:
-            # 单选：保持原有行为
-            app_id = app_ids[0]
-            notes = self.manager.read_notes(app_id).get("notes", [])
-            if not notes:
-                messagebox.showinfo("提示", f"AppID {app_id} 暂无笔记。")
-                return
-            game_name = self._get_game_name(app_id)
-            if messagebox.askyesno("确认删除",
-                                   f"确定删除「{game_name}」(AppID {app_id}) 的全部 {len(notes)} 条笔记？\n"
-                                   f"此操作不可撤销。"):
-                self.manager.delete_all_notes(app_id)
-                messagebox.showinfo("✅ 成功", f"已删除「{game_name}」的所有笔记。")
-                self._refresh_games_list()
+            self._ui_delete_notes_single(app_ids[0])
         else:
-            # 多选：批量删除
-            total_notes = 0
-            valid_ids = []
-            for aid in app_ids:
-                n = len(self.manager.read_notes(aid).get("notes", []))
-                if n > 0:
-                    total_notes += n
-                    valid_ids.append(aid)
-            if not valid_ids:
-                messagebox.showinfo("提示", "选中的游戏均无笔记。")
-                return
-            if messagebox.askyesno("确认批量删除",
-                                   f"确定删除 {len(valid_ids)} 个游戏的全部 {total_notes} 条笔记？\n"
-                                   f"此操作不可撤销。"):
-                ok = 0
-                for aid in valid_ids:
-                    if self.manager.delete_all_notes(aid):
-                        ok += 1
-                messagebox.showinfo("✅ 成功", f"已删除 {ok} 个游戏的所有笔记。")
-                self._refresh_games_list()
+            self._ui_delete_notes_batch(app_ids)
+
+    def _ui_delete_notes_single(self, app_id):
+        """单个游戏删除（尊重筛选）"""
+        notes, nids = self._resolve_app_filtered_notes(app_id)
+        if not notes:
+            messagebox.showinfo("提示", f"AppID {app_id} 暂无匹配笔记。")
+            return
+        game_name = self._get_game_name(app_id)
+        if messagebox.askyesno("确认删除",
+                f"确定删除「{game_name}」的 {len(notes)} 条笔记？\n此操作不可撤销。"):
+            self._do_delete_filtered(app_id, nids)
+            messagebox.showinfo("✅ 成功",
+                f"已删除「{game_name}」的 {len(notes)} 条笔记。")
+            self._refresh_games_list()
+
+    def _ui_delete_notes_batch(self, app_ids):
+        """批量删除（尊重筛选）"""
+        total_notes = 0
+        valid = {}
+        for aid in app_ids:
+            notes, nids = self._resolve_app_filtered_notes(aid)
+            if notes:
+                valid[aid] = nids
+                total_notes += len(notes)
+        if not valid:
+            messagebox.showinfo("提示", "选中的游戏均无笔记。")
+            return
+        if messagebox.askyesno("确认批量删除",
+                f"确定删除 {len(valid)} 个游戏的共 {total_notes} 条笔记？\n"
+                f"此操作不可撤销。"):
+            for aid, nids in valid.items():
+                self._do_delete_filtered(aid, nids)
+            messagebox.showinfo("✅ 成功",
+                f"已删除 {len(valid)} 个游戏的共 {total_notes} 条笔记。")
+            self._refresh_games_list()
 
     # ────────────────────── API Key 设置 ──────────────────────

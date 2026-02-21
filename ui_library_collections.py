@@ -790,25 +790,36 @@ class LibraryCollectionsMixin:
 
     # ── 双击分发 ──
 
+    def _display_col_to_id(self, col_str):
+        """将 identify_column 返回的 '#N' 转换为实际 column ID（兼容 displaycolumns）"""
+        if col_str == "#0":
+            return "#0"
+        idx = int(col_str.replace("#", "")) - 1
+        shown = list(self._lib_tree["displaycolumns"])
+        if 0 <= idx < len(shown):
+            return shown[idx]
+        return ""
+
     def _on_tree_double_click_dispatch(self, event):
         """双击按列分发：📝列→笔记查看器，AI信息列→AI预览"""
         region = self._lib_tree.identify_region(event.x, event.y)
         if region not in ("cell", "tree"):
             return
-        col = self._lib_tree.identify_column(event.x)
+        col_id = self._display_col_to_id(
+            self._lib_tree.identify_column(event.x))
         iid = self._lib_tree.identify_row(event.y)
         if not iid:
             return
         aid = iid.split("::n::")[0] if "::n::" in iid else iid
-        if col == "#2":
+        if col_id == "appid":
             import webbrowser
             webbrowser.open(f"https://store.steampowered.com/app/{aid}")
-        elif col == "#3":
+        elif col_id == "name":
             import webbrowser
             webbrowser.open(f"steam://nav/games/details/{aid}")
-        elif col == "#4":
+        elif col_id == "notes":
             self._open_notes_viewer(aid)
-        elif col == "#5":
+        elif col_id == "source":
             self._open_ai_notes_preview(aid)
 
     def _show_type_filter_popup(self):
@@ -910,12 +921,36 @@ class LibraryCollectionsMixin:
         else:
             self._ui_export_dialog()
 
-    def _ctx_delete(self):
-        """删除：根据上下文分发到分类删除或笔记删除
+    def _resolve_sel_note_ids(self, sel):
+        """从选中项解析 {aid: [nid, ...]}，已展开取可见子节点，未展开用筛选解析"""
+        from collections import defaultdict
+        by_app = defaultdict(list)
+        sel_set = set(sel)
+        for s in sel:
+            if "::n::" in s:
+                aid, nid = s.split("::n::")
+                by_app[aid].append(nid)
+                continue
+            # 游戏行
+            children = self._lib_tree.get_children(s)
+            real = [c for c in children if "::n::" in c]
+            if real:
+                for child in real:
+                    if child not in sel_set:
+                        aid, nid = child.split("::n::")
+                        by_app[aid].append(nid)
+            else:
+                aid = self._iid_to_app_id(s)
+                visible = self._get_visible_note_ids(aid)
+                if visible is not None:
+                    by_app[aid].extend(visible)
+                else:
+                    notes = self.manager.read_notes_cached(aid).get("notes", [])
+                    by_app[aid].extend(n["id"] for n in notes if n.get("id"))
+        return {a: nids for a, nids in by_app.items() if nids}
 
-        智能逻辑：如果选中了具体的笔记子节点，只删除那些笔记；
-        如果选中的是游戏行，则删除该游戏当前可见的笔记（跟随筛选）。
-        """
+    def _ctx_delete(self):
+        """删除：根据上下文分发到分类删除或笔记删除"""
         if self._toolbar_context == 'coll':
             self._lib_delete_collection()
             return
@@ -925,23 +960,10 @@ class LibraryCollectionsMixin:
             self._ui_delete_notes()
             return
 
-        note_children = [s for s in sel if "::n::" in s]
-        # 选中游戏行时，展开为其可见的笔记子节点（而非全部笔记）
-        for s in sel:
-            if "::n::" not in s:
-                for child in self._lib_tree.get_children(s):
-                    if "::n::" in child and child not in sel:
-                        note_children.append(child)
-        if not note_children:
+        by_app = self._resolve_sel_note_ids(sel)
+        if not by_app:
             self._ui_delete_notes()
             return
-
-        from collections import defaultdict
-        by_app = defaultdict(list)
-        for iid in note_children:
-            parts = iid.split("::n::")
-            aid, nid = parts[0], parts[1]
-            by_app[aid].append(nid)
 
         uploading = [a for a in by_app if self.is_app_uploading(a)]
         if uploading:
@@ -957,8 +979,7 @@ class LibraryCollectionsMixin:
         total = sum(len(nids) for nids in by_app.values())
         if total == 1:
             aid = next(iter(by_app))
-            game_name = self._get_game_name(aid)
-            msg = f"确定删除「{game_name}」的 1 条笔记？"
+            msg = f"确定删除「{self._get_game_name(aid)}」的 1 条笔记？"
         else:
             msg = f"确定删除 {len(by_app)} 个游戏的共 {total} 条笔记？"
 
@@ -1191,6 +1212,11 @@ class LibraryCollectionsMixin:
             return "break"
         self._coll_drag_start = item
         self._coll_drag_moved = False
+        # Ctrl/Cmd 拖动：保存已有选择作为基底
+        if event.state & 0xC:
+            self._coll_drag_base = set(self._coll_tree.selection())
+        else:
+            self._coll_drag_base = None
         # 慢点击重命名：已选中的 uc- 项再次点击时启动计时器
         sel = self._coll_tree.selection()
         if (len(sel) == 1 and sel[0] == item
@@ -1198,15 +1224,61 @@ class LibraryCollectionsMixin:
             self._coll_rename_timer = self.root.after(
                 500, lambda: self._coll_begin_inline_rename(item))
 
+    def _drag_autoscroll(self, tree, y):
+        """拖动到边缘时启动定时滚动，返回 clamp 后的 y 坐标"""
+        h = tree.winfo_height()
+        at_edge = y > h - 25 or y < 25
+        if not at_edge:
+            self._drag_scroll_cancel()
+            return y
+        self._drag_scroll_tree = tree
+        self._drag_scroll_dir = 1 if y > h - 25 else -1
+        if not getattr(self, '_drag_scroll_timer', None):
+            self._drag_scroll_t0 = time.time()
+            self._drag_scroll_tick()
+        return h - 26 if y > h - 25 else 26
+
+    def _drag_scroll_tick(self):
+        """定时回调：滚动 + 更新选区 + 调度下一次"""
+        tree = getattr(self, '_drag_scroll_tree', None)
+        if not tree:
+            return
+        elapsed = time.time() - getattr(self, '_drag_scroll_t0', 0)
+        if elapsed < 2:
+            speed, delay = 1, 280
+        elif elapsed < 4:
+            speed, delay = 2, 150
+        else:
+            speed, delay = 3, 80
+        d = getattr(self, '_drag_scroll_dir', 0)
+        tree.yview_scroll(d * speed, "units")
+        # 重置 last 以强制选区更新，然后用合成事件触发选区逻辑
+        if tree is getattr(self, '_lib_tree', None):
+            self._game_drag_last = None
+        h = tree.winfo_height()
+        tree.event_generate("<B1-Motion>", x=50,
+                            y=h - 26 if d > 0 else 26)
+        self._drag_scroll_timer = self.root.after(
+            delay, self._drag_scroll_tick)
+
+    def _drag_scroll_cancel(self, event=None):
+        """取消自动滚动定时器"""
+        timer = getattr(self, '_drag_scroll_timer', None)
+        if timer:
+            self.root.after_cancel(timer)
+        self._drag_scroll_timer = None
+        self._drag_scroll_t0 = 0
+
     def _on_game_drag_motion(self, event):
         """游戏列表拖动多选（含层级展开：选中游戏行时自动包含子笔记）"""
         if not self._game_drag_start:
             return
-        item = self._lib_tree.identify_row(event.y)
+        tree = self._lib_tree
+        cy = self._drag_autoscroll(tree, event.y)
+        item = tree.identify_row(cy)
         if not item or item == getattr(self, '_game_drag_last', None):
             return
         self._game_drag_last = item
-        tree = self._lib_tree
 
         if not getattr(self, '_game_drag_flat', None):
             flat = []
@@ -1236,10 +1308,14 @@ class LibraryCollectionsMixin:
                         expanded.append(child)
                         expanded_set.add(child)
 
+        base = getattr(self, '_game_drag_base', None)
+        if base:
+            expanded_set |= base
+
         self._selection_updating = True
         try:
-            tree.selection_set(expanded)
-            self._prev_tree_selection = expanded_set | set(tree.selection())
+            tree.selection_set(list(expanded_set))
+            self._prev_tree_selection = expanded_set
         finally:
             self._selection_updating = False
 
@@ -1251,7 +1327,8 @@ class LibraryCollectionsMixin:
             self._coll_rename_timer = None
         if not self._coll_drag_start:
             return
-        item = self._coll_tree.identify_row(event.y)
+        cy = self._drag_autoscroll(self._coll_tree, event.y)
+        item = self._coll_tree.identify_row(cy)
         if not item:
             return
         all_items = self._coll_tree.get_children()
@@ -1262,7 +1339,10 @@ class LibraryCollectionsMixin:
             end_idx = all_items.index(item)
             if start_idx > end_idx:
                 start_idx, end_idx = end_idx, start_idx
-            items_to_select = all_items[start_idx:end_idx+1]
+            items_to_select = list(all_items[start_idx:end_idx+1])
+            base = getattr(self, '_coll_drag_base', None)
+            if base:
+                items_to_select = list(base) + items_to_select
             self._coll_tree.selection_set(items_to_select)
         except ValueError:
             pass
@@ -1270,13 +1350,17 @@ class LibraryCollectionsMixin:
     def _show_column_visibility_menu(self, event):
         """右键表头：弹出列可见性切换菜单"""
         menu = tk.Menu(self.root, tearoff=0)
+        if self._sort_columns:
+            menu.add_command(label="🔄 清空排序", command=self._clear_all_sorts)
+            menu.add_separator()
         # 必须存为实例属性，防止 BooleanVar 被 GC 回收导致勾选消失
         self._col_vis_vars = {}
         toggleable = [
-            ("notes", "📝 笔记数"), ("source", "AI信息"),
-            ("date", "最新笔记"), ("review_label", "评测等级"),
-            ("review", "好评%"), ("release", "发行日期"),
-            ("acquired", "入库时间"), ("metacritic", "MC分数"),
+            ("appid", "AppID"), ("notes", "📝 笔记数"),
+            ("source", "AI信息"), ("date", "最新笔记"),
+            ("review_label", "评测等级"), ("review", "好评%"),
+            ("release", "发行日期"), ("acquired", "入库时间"),
+            ("metacritic", "MC分数"),
         ]
         for col_id, label in toggleable:
             var = tk.BooleanVar(value=col_id in self._visible_columns)
@@ -1290,11 +1374,11 @@ class LibraryCollectionsMixin:
         """切换列的显示/隐藏"""
         if col in self._visible_columns:
             self._visible_columns.discard(col)
-            self._lib_tree.column(col, width=0, minwidth=0, stretch=False)
         else:
             self._visible_columns.add(col)
             w, mw = self._col_defaults.get(col, (60, 40))
             self._lib_tree.column(col, width=w, minwidth=mw)
+        self._apply_displaycolumns()
         self._config["visible_columns"] = list(self._visible_columns)
         self._config_mgr.save()
 
@@ -1341,6 +1425,21 @@ class LibraryCollectionsMixin:
             self._apply_sort_order(self._lib_tree)
         else:
             self._lib_populate_tree(force_rebuild=True)
+
+    def _clear_all_sorts(self):
+        """清空所有排序状态，恢复默认顺序"""
+        self._sort_columns.clear()
+        self._sort_order.clear()
+        # 重置所有表头文字
+        col_names = {"type": "Type", "appid": "AppID", "name": "游戏名称",
+                     "notes": "📝", "source": "AI信息", "date": "最新笔记",
+                     "review_label": "评测", "review": "好评%",
+                     "release": "发行", "acquired": "入库", "metacritic": "MC"}
+        for c, text in col_names.items():
+            if c == "type" and len(self._type_filter) < len(self._ALL_TYPES):
+                text += " ▼"
+            self._lib_tree.heading(c, text=text)
+        self._lib_populate_tree(force_rebuild=True)
 
     def _apply_sort_order(self, tree):
         """使用预缓存排序键 + 单次 Tcl 调用重排顶层项顺序（极快）"""

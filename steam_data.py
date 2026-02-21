@@ -111,6 +111,32 @@ def _extract_detail(d: dict) -> dict:
     return detail
 
 
+def parse_release_date(date_str: str) -> int:
+    """将 Store API 的发行日期字符串解析为 Unix 时间戳
+
+    支持格式：'May 1, 2013' / '1 May, 2013' / '2013 年 5 月 1 日' 等
+    解析失败返回 0。
+    """
+    if not date_str:
+        return 0
+    from datetime import datetime
+    s = date_str.strip()
+    # 中文格式：'2013 年 5 月 1 日'
+    m = re.match(r'(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日', s)
+    if m:
+        try:
+            return int(datetime(int(m.group(1)), int(m.group(2)),
+                                int(m.group(3))).timestamp())
+        except ValueError:
+            pass
+    for fmt in ("%b %d, %Y", "%d %b, %Y", "%B %d, %Y", "%d %B, %Y", "%Y"):
+        try:
+            return int(datetime.strptime(s, fmt).timestamp())
+        except ValueError:
+            continue
+    return 0
+
+
 def get_review_summary(app_id: str):
     """轻量获取评测摘要（num_per_page=0），返回 {review_score, review_pct} 或 None
     429 限速时返回 "rate_limited"。

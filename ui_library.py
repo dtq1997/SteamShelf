@@ -19,6 +19,7 @@ from tkinter import messagebox, ttk
 from ui_utils import AutoScrollbar, bg_thread
 
 from account_manager import SteamAccountScanner
+from steam_data import parse_release_date
 from ui_library_collections import LibraryCollectionsMixin
 from ui_library_source_update import LibrarySourceUpdateMixin
 
@@ -99,6 +100,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._coll_drag_start = None
         self._coll_tree.bind("<ButtonPress-1>", self._on_coll_drag_start)
         self._coll_tree.bind("<B1-Motion>", self._on_coll_drag_motion)
+        self._coll_tree.bind("<ButtonRelease-1>", self._drag_scroll_cancel)
         self._coll_tree.bind("<Double-1>", self._on_coll_double_click)
         self._coll_tree.bind("<Button-2>" if platform.system() == "Darwin" else "<Button-3>",
                               self._on_coll_right_click)
@@ -141,17 +143,12 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                         command=lambda: self._lib_populate_tree()
                         ).pack(side=tk.LEFT, padx=(4, 0))
 
-        # 工具按钮（右侧对齐）
+        # 工具按钮（右侧对齐：全选最右，全部上传在其左，仅有改动时显示）
+        ttk.Button(title_frame, text="✅ 全选", width=6,
+                   command=self._select_all_games).pack(side=tk.RIGHT, padx=(2, 0))
         self._upload_all_btn = ttk.Button(title_frame,
             text="☁️ 全部上传", width=12,
             command=self._cloud_upload_all)
-        self._upload_all_btn.pack(side=tk.RIGHT, padx=(2, 0))
-        self._upload_sel_btn = ttk.Button(title_frame,
-            text="☁️ 选中上传", width=9,
-            command=self._cloud_upload_selected)
-        self._upload_sel_btn.pack(side=tk.RIGHT, padx=(2, 0))
-        ttk.Button(title_frame, text="✅ 全选", width=6,
-                   command=self._select_all_games).pack(side=tk.RIGHT, padx=(2, 0))
 
         # ── 搜索栏（含搜索模式切换） ──
         lib_search_frame = tk.Frame(right)
@@ -292,23 +289,22 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_tree.column("name", width=300, minwidth=200, stretch=True, anchor=tk.W)
         self._lib_tree.column("notes", width=45, minwidth=35, stretch=False, anchor=tk.CENTER)
         self._lib_tree.column("source", width=70, minwidth=50, stretch=False, anchor=tk.W)
-        self._lib_tree.column("date", width=82, minwidth=70, stretch=False, anchor=tk.CENTER)
+        self._lib_tree.column("date", width=82, minwidth=70, stretch=False, anchor=tk.W)
         # 新增信息列（默认隐藏，通过右键表头菜单切换）
-        self._lib_tree.column("review_label", width=75, minwidth=55, stretch=False, anchor=tk.W)
-        self._lib_tree.column("review", width=50, minwidth=40, stretch=False, anchor=tk.CENTER)
-        self._lib_tree.column("release", width=70, minwidth=55, stretch=False, anchor=tk.CENTER)
-        self._lib_tree.column("acquired", width=82, minwidth=70, stretch=False, anchor=tk.CENTER)
+        self._lib_tree.column("review_label", width=65, minwidth=50, stretch=False, anchor=tk.W)
+        self._lib_tree.column("review", width=50, minwidth=40, stretch=False, anchor=tk.W)
+        self._lib_tree.column("release", width=82, minwidth=70, stretch=False, anchor=tk.W)
+        self._lib_tree.column("acquired", width=82, minwidth=70, stretch=False, anchor=tk.W)
         self._lib_tree.column("metacritic", width=35, minwidth=30, stretch=False, anchor=tk.CENTER)
 
         # 列可见性系统
         self._col_defaults = {
             "type": (40, 35), "appid": (60, 50), "name": (300, 200),
             "notes": (45, 35), "source": (70, 50), "date": (82, 70),
-            "review_label": (75, 55), "review": (50, 40),
-            "release": (70, 55), "acquired": (82, 70), "metacritic": (35, 30),
+            "review_label": (65, 50), "review": (50, 40),
+            "release": (82, 70), "acquired": (82, 70), "metacritic": (35, 30),
         }
-        _default_visible = {"type", "appid", "name", "notes", "source",
-                            "date", "review_label", "review", "release"}
+        _default_visible = {"type", "name", "source", "review_label", "acquired"}
         saved = self._config.get("visible_columns")
         if saved:
             self._visible_columns = set(saved)
@@ -322,11 +318,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 self._config_mgr.save()
         else:
             self._visible_columns = _default_visible
-        # 隐藏不可见列
-        for c in ("review_label", "review", "release", "acquired",
-                   "metacritic", "notes", "source", "date"):
-            if c not in self._visible_columns:
-                self._lib_tree.column(c, width=0, minwidth=0, stretch=False)
+        self._apply_displaycolumns()
         # 树列（展开箭头）— 窄且不可拖，与内容融为一体
         self._lib_tree.column("#0", width=20, minwidth=20, stretch=False)
         self._lib_tree.heading("#0", text="")
@@ -374,9 +366,15 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             self._game_drag_last = None
             self._game_drag_flat = None
             self._game_drag_idx = None
+            # Ctrl/Cmd 拖动：保存已有选择作为基底
+            if event.state & 0xC:  # Ctrl(0x4) or Command(0x8)
+                self._game_drag_base = set(self._lib_tree.selection())
+            else:
+                self._game_drag_base = None
 
         self._lib_tree.bind("<Button-1>", _on_tree_click)
         self._lib_tree.bind("<B1-Motion>", self._on_game_drag_motion)
+        self._lib_tree.bind("<ButtonRelease-1>", self._drag_scroll_cancel)
 
         # 双击：按列分发（📝列→笔记查看器，AI信息列→AI预览）
         self._lib_tree.bind("<Double-1>", self._on_tree_double_click_dispatch)
@@ -387,6 +385,16 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_tree.bind("<<TreeviewSelect>>", self._on_game_selection_changed)
         # 懒加载：展开时替换占位子节点为真实笔记
         self._lib_tree.bind("<<TreeviewOpen>>", self._on_tree_open)
+        # 回车键：游戏行→收放笔记，笔记行→打开查看器
+        self._lib_tree.bind("<Return>", self._on_tree_return)
+        # 焦点指示器（模拟 Windows 虚线框）
+        self._lib_tree.tag_configure("focused_row",
+            background="#d0e4f7")
+        self._focused_iid = None
+        self._lib_tree.bind("<<TreeviewSelect>>",
+            self._update_focus_indicator, add=True)
+        self._lib_tree.bind("<FocusOut>",
+            lambda e: self._clear_focus_indicator())
 
         # 存储库数据
         self._lib_all_games = []  # 全部游戏列表
@@ -522,6 +530,26 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
     # ── 工具方法（纯函数） ──
 
+    _ALL_COLUMNS = ("type", "appid", "name", "notes", "source", "date",
+                    "review_label", "review", "release", "acquired", "metacritic")
+
+    def _apply_displaycolumns(self):
+        """根据 _visible_columns 设置 displaycolumns，彻底隐藏不可见列"""
+        shown = [c for c in self._ALL_COLUMNS if c in self._visible_columns]
+        self._lib_tree["displaycolumns"] = shown
+        # displaycolumns 会重置 stretch，必须重新应用
+        for col in shown:
+            self._lib_tree.column(col, stretch=(col == "name"))
+        # Tkinter bug: displaycolumns 后 heading command 按原始列序号分发
+        # 必须用 #N 位置语法重绑，才能对应实际显示列
+        for i, col in enumerate(shown):
+            if col == "type":
+                self._lib_tree.heading(f"#{i+1}",
+                    command=self._show_type_filter_popup)
+            else:
+                self._lib_tree.heading(f"#{i+1}",
+                    command=lambda c=col: self._lib_sort_column(c))
+
     @staticmethod
     def _get_type_name(app_type):
         """将 Steam EAppType 枚举值转换为显示字符串
@@ -592,6 +620,80 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                             tags=("note_child",))
         except Exception:
             pass
+
+    def _on_tree_return(self, event=None):
+        """回车键：游戏行→收放笔记，笔记行→打开查看器"""
+        tree = self._lib_tree
+        iid = tree.focus()
+        if not iid:
+            return
+        if "::n::" in iid:
+            # 笔记子节点 → 打开查看器
+            aid = iid.split("::n::")[0]
+            self._open_notes_viewer(aid)
+        else:
+            # 游戏行 → 切换展开/收起
+            if tree.get_children(iid):
+                is_open = tree.item(iid, 'open')
+                tree.item(iid, open=not is_open)
+                if not is_open:
+                    self._on_tree_open()
+
+    def _update_focus_indicator(self, event=None):
+        """更新焦点指示器：给当前 focus 项加浅色背景"""
+        tree = self._lib_tree
+        new_iid = tree.focus()
+        old_iid = self._focused_iid
+        if old_iid == new_iid:
+            return
+        # 移除旧标签
+        if old_iid:
+            try:
+                tags = [t for t in tree.item(old_iid, "tags")
+                        if t != "focused_row"]
+                tree.item(old_iid, tags=tuple(tags))
+            except Exception:
+                pass
+        # 添加新标签
+        if new_iid:
+            try:
+                tags = list(tree.item(new_iid, "tags"))
+                if "focused_row" not in tags:
+                    tags.append("focused_row")
+                tree.item(new_iid, tags=tuple(tags))
+            except Exception:
+                pass
+        self._focused_iid = new_iid
+
+    def _clear_focus_indicator(self):
+        """失焦时移除焦点指示器"""
+        if self._focused_iid:
+            try:
+                tags = [t for t in self._lib_tree.item(
+                    self._focused_iid, "tags") if t != "focused_row"]
+                self._lib_tree.item(self._focused_iid, tags=tuple(tags))
+            except Exception:
+                pass
+            self._focused_iid = None
+
+    def _get_visible_note_ids(self, app_id):
+        """返回当前筛选条件下可见的笔记 ID 集合（None = 无筛选，全部可见）"""
+        filters = self._lib_read_filter_state()
+        fm = filters['filter_mode']
+        if fm == "全部":
+            return None
+        notes = self.manager.read_notes_cached(app_id).get("notes", [])
+        result = set()
+        for n in notes:
+            ai = is_ai_note(n)
+            if fm == "🤖AI" and not ai:
+                continue
+            if fm == "📝未AI" and ai:
+                continue
+            nid = n.get("id")
+            if nid:
+                result.add(nid)
+        return result
 
     def _lib_load_notes_data(self):
         """加载笔记相关数据：笔记游戏列表、AI 笔记映射、同步状态映射"""
@@ -774,7 +876,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         label_col = self._REVIEW_LABELS.get(review_score, "") if review_score else ""
         pct_col = f"{review_pct}%" if review_pct else ""
         rt_release = g.get('rt_release', 0)
-        release_col = (datetime.fromtimestamp(rt_release).strftime("%Y-%m")
+        release_col = (datetime.fromtimestamp(rt_release).strftime("%Y-%m-%d")
                        if rt_release else g.get('release_date_str', ''))
         rt_purchased = g.get('rt_purchased', 0)
         acquired_col = (datetime.fromtimestamp(rt_purchased).strftime("%Y-%m-%d")
@@ -840,6 +942,12 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         # 游戏行日期 = 最新笔记日期
         date_col = datetime.fromtimestamp(latest_ts).strftime("%Y-%m-%d") if latest_ts else ""
 
+        # 回填发行日期：CEF 无数据时从 Store API 缓存解析
+        if not g.get('rt_release'):
+            detail = getattr(self, '_app_detail_cache', {}).get(aid)
+            if isinstance(detail, dict) and detail.get('release_date'):
+                g['rt_release'] = parse_release_date(detail['release_date'])
+
         # 新增信息列 + 排序键
         label_col, pct_col, release_col, acquired_col, mc_col = self._format_info_cols(g)
         self._cache_sort_keys(
@@ -893,8 +1001,9 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             if hasattr(self, '_upload_all_btn'):
                 if dirty_n > 0:
                     self._upload_all_btn.config(text=f"☁️ 全部上传({dirty_n})")
+                    self._upload_all_btn.pack(side=tk.RIGHT, padx=(2, 0))
                 else:
-                    self._upload_all_btn.config(text="☁️ 全部上传")
+                    self._upload_all_btn.pack_forget()
 
     def _lib_populate_tree(self, force_rebuild=False):
         """填充统一游戏列表（库数据 + 笔记数据合并）"""

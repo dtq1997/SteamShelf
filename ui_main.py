@@ -738,6 +738,24 @@ class SteamToolboxMain(
                 force_rebuild=True))
         except Exception:
             pass
+        # 接力：补查已入库游戏的发行日期
+        self.root.after(500, self._bg_resolve_owned_release_dates)
+
+    def _bg_resolve_owned_release_dates(self):
+        """后台补查已入库游戏中 rt_release=0 的发行日期"""
+        if getattr(self, '_resolve_thread_running', False):
+            return
+        games = getattr(self, '_lib_all_games', [])
+        need = [str(g['app_id']) for g in games
+                if not g.get('rt_release')
+                and str(g['app_id']) not in self._app_detail_cache]
+        if not need:
+            return
+        print(f"[库管理] 后台补查 {len(need)} 个已入库游戏的发行日期")
+        self._resolve_thread_running = True
+        self._resolve_progress = (0, len(need))
+        threading.Thread(target=self._resolve_worker,
+                         args=(need,), daemon=True).start()
 
     def _persist_all_caches(self):
         """一次性持久化所有游戏缓存（单次写盘）"""
@@ -1046,9 +1064,11 @@ class SteamToolboxMain(
         sel = self._games_tree.selection()
         # 提取去重后的 app_id 列表
         app_ids = []
+        seen = set()
         for s in sel:
             aid = self._iid_to_app_id(s)
-            if aid not in app_ids:
+            if aid not in seen:
+                seen.add(aid)
                 app_ids.append(aid)
         if len(app_ids) == 1:
             aid = app_ids[0]
@@ -1065,11 +1085,12 @@ class SteamToolboxMain(
         else:
             menu.add_command(label=f"📤 导出 ({len(app_ids)} 个游戏)",
                              command=self._ui_export_dialog)
-            dirty_sel = [a for a in app_ids if self.manager.is_dirty(a)]
-            if dirty_sel:
-                menu.add_command(label=f"☁️ 上传选中 ({len(dirty_sel)} 个)",
+            # 大量选中时用总 dirty count 避免逐个检查
+            dirty_n = self.manager.dirty_count() if self.manager else 0
+            if dirty_n > 0:
+                menu.add_command(label=f"☁️ 上传选中的改动",
                                  command=self._cloud_upload_selected)
-                menu.add_command(label=f"✅ 标记选中为已同步 ({len(dirty_sel)} 个)",
+                menu.add_command(label=f"✅ 标记选中为已同步",
                                  command=self._mark_synced_selected)
         # 展开/收起
         menu.add_separator()

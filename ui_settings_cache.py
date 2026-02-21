@@ -62,33 +62,56 @@ def build_cache_manager_ui(app):
                command=_clear_name_cache).pack(side=tk.RIGHT)
     name_count_lbl = tk.Label(row1, text="", font=("", 9), fg="#888")
 
-    # 后台获取进度（type resolver）
-    is_running = getattr(app, '_resolve_thread_running', False)
-    progress = getattr(app, '_resolve_progress', (0, 0))
-    if is_running and progress[1] > 0:
-        row_resolve = tk.Frame(info_frame)
-        row_resolve.pack(fill=tk.X, pady=2)
-        resolve_label = tk.Label(row_resolve,
-            text=f"    🔍 后台获取中: {progress[0]}/{progress[1]}",
-            font=("", 9), fg="#4a90d9")
-        resolve_label.pack(side=tk.LEFT)
-        resolve_bar = ttk.Progressbar(row_resolve, mode='determinate',
-            length=120, maximum=progress[1], value=progress[0])
-        resolve_bar.pack(side=tk.RIGHT, padx=(0, 5))
+    # 后台获取进度（Store API resolver）
+    row_resolve = tk.Frame(info_frame)
+    row_resolve.pack(fill=tk.X, pady=2)
+    resolve_label = tk.Label(row_resolve, text="", font=("", 9), fg="#4a90d9")
+    resolve_label.pack(side=tk.LEFT)
+    resolve_bar = ttk.Progressbar(row_resolve, mode='determinate', length=120)
+    resolve_bar.pack(side=tk.RIGHT, padx=(0, 5))
 
-        def _poll_resolve():
-            if not cache_win.winfo_exists():
-                return
-            p = getattr(app, '_resolve_progress', (0, 0))
-            running = getattr(app, '_resolve_thread_running', False)
+    def _count_missing_release():
+        games = getattr(app, '_lib_all_games', [])
+        dc = getattr(app, '_app_detail_cache', {})
+        return sum(1 for g in games
+                   if not g.get('rt_release')
+                   and str(g['app_id']) not in dc)
+
+    def _trigger_resolve():
+        if getattr(app, '_resolve_thread_running', False):
+            return
+        app._bg_resolve_owned_release_dates()
+        cache_win.after(500, _poll_resolve)
+
+    resolve_btn = ttk.Button(row_resolve, text="▶ 补查", width=6,
+                             command=_trigger_resolve)
+
+    def _poll_resolve():
+        if not cache_win.winfo_exists():
+            return
+        p = getattr(app, '_resolve_progress', (0, 0))
+        running = getattr(app, '_resolve_thread_running', False)
+        if running and p[1] > 0:
             resolve_label.config(
-                text=f"    🔍 后台获取中: {p[0]}/{p[1]}" if running
-                else f"    ✅ 已完成 {p[1]} 个")
-            resolve_bar.config(value=p[0])
-            if running:
-                cache_win.after(2000, _poll_resolve)
+                text=f"🔍 后台获取中: {p[0]}/{p[1]}")
+            resolve_bar.config(maximum=p[1], value=p[0])
+            resolve_bar.pack(side=tk.RIGHT, padx=(0, 5))
+            resolve_btn.pack_forget()
+        else:
+            missing = _count_missing_release()
+            if missing > 0:
+                resolve_label.config(
+                    text=f"📅 {missing} 个游戏缺发行日期")
+                resolve_bar.pack_forget()
+                resolve_btn.pack(side=tk.RIGHT, padx=(0, 5))
+            else:
+                resolve_label.config(text="✅ 详情缓存完整")
+                resolve_bar.pack_forget()
+                resolve_btn.pack_forget()
+        if running:
+            cache_win.after(1500, _poll_resolve)
 
-        cache_win.after(2000, _poll_resolve)
+    _poll_resolve()
 
     # 游戏类型缓存
     type_cache = app._config.get("app_type_cache", {})
