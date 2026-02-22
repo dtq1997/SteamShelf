@@ -105,13 +105,6 @@ class InlineAIGenMixin:
             command=self._show_ai_gen_menu)
         self._inline_gen_btn.pack(side=tk.LEFT)
 
-        self._inline_skip_existing_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            self._inline_action_frame, text="跳过已有AI笔记",
-            variable=self._inline_skip_existing_var,
-            style="Filter.TCheckbutton"
-        ).pack(side=tk.LEFT, padx=(10, 0))
-
         # ── 控制按钮（操作行右侧，初始不 pack） ──
         # pack 顺序：collapse 先 pack(RIGHT) 到最右，stop 次之，pause 最左
         self._inline_collapse_btn = ttk.Button(
@@ -343,16 +336,12 @@ class InlineAIGenMixin:
         self._inline_log_text.config(state=tk.DISABLED)
         self._inline_ai_show_progress()
 
-        # 跳过已有 AI 笔记
-        if self._inline_skip_existing_var.get():
-            filtered = []
-            for aid, name in games_list:
-                existing = self.manager.read_notes(aid).get("notes", [])
-                if any(is_ai_note(n) for n in existing):
-                    self._inline_log(f"⏭️ 跳过 {name or aid} (已有 AI 笔记)")
-                else:
-                    filtered.append((aid, name))
-            games_list = filtered
+        # 冲突检测
+        self._inline_ai_policy = {}
+        games_list = self._inline_resolve_conflicts(games_list)
+        if games_list is None:
+            self._inline_progress_var.set("已取消")
+            return
 
         if not games_list:
             self._inline_log("所有选中的游戏都已有 AI 笔记。")
@@ -360,6 +349,44 @@ class InlineAIGenMixin:
             return
 
         self._inline_start_worker(games_list)
+
+    def _inline_resolve_conflicts(self, games_list):
+        """检测并处理 AI 笔记冲突，返回过滤后列表或 None(取消)"""
+        _, ai_map = self.manager.scan_all()  # mtime 缓存，极快
+        conflict_games = [(aid, name) for aid, name in games_list
+                          if aid in ai_map]
+        if not conflict_games:
+            return games_list
+
+        result = self._inline_ai_conflict_dialog(
+            conflict_games, len(games_list))
+        if result == "cancel":
+            return None
+        if result == "skip":
+            for aid, name in conflict_games:
+                self._inline_log(
+                    f"⏭️ 跳过 {name or aid} (已有 AI 笔记)")
+            return [g for g in games_list if g not in conflict_games]
+        if result == "replace":
+            for aid, _ in conflict_games:
+                self._inline_ai_policy[aid] = "replace"
+            return games_list
+        if result == "append":
+            for aid, _ in conflict_games:
+                self._inline_ai_policy[aid] = "append"
+            return games_list
+        if isinstance(result, dict):
+            self._inline_ai_policy = result
+            skip_aids = {a for a, p in result.items() if p == "skip"}
+            if skip_aids:
+                for aid, name in conflict_games:
+                    if aid in skip_aids:
+                        self._inline_log(
+                            f"⏭️ 跳过 {name or aid} (用户选择)")
+                return [g for g in games_list
+                        if g[0] not in skip_aids]
+            return games_list
+        return games_list
 
     # ────────────────────── Worker 启动 ──────────────────────
 
@@ -581,6 +608,25 @@ class InlineAIGenMixin:
             all_warns.append(search_warn)
         source_status = "|".join(all_warns)
 
+        # 信息过少时不覆盖已有 AI 笔记（避免用无用标注替换正常内容）
+        if is_insufficient:
+            existing = self.manager.read_notes(aid).get("notes", [])
+            if any(is_ai_note(n) for n in existing):
+                self.root.after(0, lambda n=name, a=aid:
+                    self._inline_log(
+                        f"⏭️ {n} (AppID {a}): 信息过少，保留已有 AI 笔记"))
+                return True
+
+        # 覆盖模式：根据冲突策略决定是否删除旧 AI 笔记
+        policy = getattr(self, '_inline_ai_policy', {}).get(aid, 'replace')
+        if policy == "replace":
+            data = self.manager.read_notes(aid)
+            notes_list = data.get("notes", [])
+            if any(is_ai_note(n) for n in notes_list):
+                data["notes"] = [n for n in notes_list
+                                 if not is_ai_note(n)]
+                self.manager.write_notes(aid, data)
+
         if is_insufficient:
             return self._inline_save_insufficient(
                 aid, name, actual_model, info_volume,
@@ -592,6 +638,190 @@ class InlineAIGenMixin:
         return self._inline_save_normal(
             aid, name, content, actual_model, confidence,
             info_volume, quality, ws_mode, source_status)
+
+    def _inline_ai_conflict_dialog(self, conflict_games, total):
+        """AI 生成冲突对话框
+        返回: 'replace'/'append'/'skip'/'cancel' 或 dict (逐一处理)
+        """
+        result = {"choice": "cancel"}
+        dlg = tk.Toplevel(self.root)
+        dlg.title("⚠️ AI 笔记冲突")
+        dlg.resizable(False, True)
+        dlg.grab_set()
+        dlg.transient(self.root)
+
+        n_conflict = len(conflict_games)
+        n_safe = total - n_conflict
+        tk.Label(dlg, text="⚠️ 检测到已有 AI 笔记",
+                 font=("", 13, "bold"), fg="#c0392b").pack(pady=(15, 5))
+        tk.Label(dlg,
+                 text=f"选中 {total} 个游戏，其中 {n_conflict} 个已有 AI 笔记"
+                      f"（{n_safe} 个无冲突将正常生成）",
+                 font=("", 10), fg="#666").pack(pady=(0, 8))
+
+        # 冲突列表
+        list_frame = tk.LabelFrame(dlg, text=f"冲突游戏 ({n_conflict})",
+                                   font=("", 10), padx=10, pady=5)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
+        list_inner = tk.Frame(list_frame)
+        list_inner.pack(fill=tk.BOTH, expand=True)
+        scrollbar = tk.Scrollbar(list_inner)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        txt = tk.Text(list_inner, width=50,
+                      height=min(n_conflict + 1, 10),
+                      font=("", 10), wrap=tk.WORD,
+                      yscrollcommand=scrollbar.set)
+        txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=txt.yview)
+        for aid, name in conflict_games:
+            txt.insert(tk.END, f"  {name or aid} ({aid})\n")
+        txt.config(state=tk.DISABLED)
+
+        # 选项说明
+        tk.Label(dlg, text="请选择冲突的处理方式：",
+                 font=("", 10, "bold")).pack(pady=(10, 5))
+        desc_frame = tk.Frame(dlg, padx=20)
+        desc_frame.pack(fill=tk.X)
+        for icon, label, desc in [
+            ("🔄", "全部替换", "删除旧 AI 笔记，重新生成"),
+            ("➕", "全部追加", "保留旧 AI 笔记，新笔记追加在后面"),
+            ("⏭️", "跳过已有", "仅为无 AI 笔记的游戏生成"),
+            ("🔍", "逐一处理", "逐个游戏查看旧笔记，分别选择替换/追加/跳过"),
+        ]:
+            tk.Label(desc_frame, text=f"  {icon} {label} — {desc}",
+                     font=("", 9), fg="#555", anchor=tk.W
+                     ).pack(anchor=tk.W)
+
+        # 按钮
+        btn_frame = tk.Frame(dlg)
+        btn_frame.pack(pady=(12, 15))
+
+        def _pick(c):
+            result["choice"] = c
+            dlg.grab_release()
+            dlg.destroy()
+
+        def _do_one_by_one():
+            dlg.grab_release()
+            dlg.destroy()
+            per_app = self._inline_ai_one_by_one(conflict_games)
+            result["choice"] = per_app  # dict or "cancel"
+
+        ttk.Button(btn_frame, text="🔄 全部替换",
+                   command=lambda: _pick("replace")).pack(
+                       side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="➕ 全部追加",
+                   command=lambda: _pick("append")).pack(
+                       side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="⏭️ 跳过已有",
+                   command=lambda: _pick("skip")).pack(
+                       side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="🔍 逐一处理",
+                   command=_do_one_by_one).pack(
+                       side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="取消",
+                   command=lambda: _pick("cancel")).pack(
+                       side=tk.LEFT, padx=(12, 4))
+
+        dlg.protocol("WM_DELETE_WINDOW", lambda: _pick("cancel"))
+        self._center_window(dlg)
+        dlg.wait_window()
+        return result["choice"]
+
+    def _inline_ai_one_by_one(self, conflict_games):
+        """逐一处理冲突，展示已有 AI 笔记，返回 {aid: policy} 或 'cancel'"""
+        per_app = {}
+        current_idx = [0]
+
+        owin = tk.Toplevel(self.root)
+        owin.title("🔍 逐一处理 AI 笔记冲突")
+        owin.resizable(True, True)
+        owin.grab_set()
+        owin.transient(self.root)
+        owin.geometry("650x420")
+
+        progress_label = tk.Label(owin, font=("", 11, "bold"))
+        progress_label.pack(pady=(10, 0))
+        game_label = tk.Label(owin, font=("", 12, "bold"), fg="#1a73e8")
+        game_label.pack(pady=(2, 8))
+
+        # 已有笔记展示区
+        note_frame = tk.LabelFrame(owin, text="📋 已有 AI 笔记",
+                                   font=("", 10), padx=10, pady=5)
+        note_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
+        note_scroll = tk.Scrollbar(note_frame)
+        note_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        note_text = tk.Text(note_frame, font=("", 9), wrap=tk.WORD,
+                            bg="#fff5f5", yscrollcommand=note_scroll.set)
+        note_text.pack(fill=tk.BOTH, expand=True)
+        note_scroll.config(command=note_text.yview)
+
+        def _show_current():
+            idx = current_idx[0]
+            aid, name = conflict_games[idx]
+            total = len(conflict_games)
+            progress_label.config(text=f"冲突 {idx + 1} / {total}")
+            game_label.config(text=f"🎮 {name or aid} (AppID: {aid})")
+            # 渲染已有 AI 笔记
+            notes = self.manager.read_notes(aid).get("notes", [])
+            ai_notes = [nt for nt in notes if is_ai_note(nt)]
+            note_text.config(state=tk.NORMAL)
+            note_text.delete("1.0", tk.END)
+            for i, nt in enumerate(ai_notes):
+                if i > 0:
+                    note_text.insert(tk.END, "\n" + "─" * 50 + "\n\n")
+                content = nt.get("content", nt.get("title", ""))
+                note_text.insert(tk.END, content)
+            note_text.config(state=tk.DISABLED)
+
+        def _choose(policy):
+            aid = conflict_games[current_idx[0]][0]
+            per_app[aid] = policy
+            current_idx[0] += 1
+            if current_idx[0] >= len(conflict_games):
+                _finish()
+            else:
+                _show_current()
+
+        def _finish():
+            owin.grab_release()
+            owin.destroy()
+
+        def _skip_remaining():
+            for j in range(current_idx[0], len(conflict_games)):
+                per_app[conflict_games[j][0]] = "skip"
+            _finish()
+
+        cancelled = [False]
+
+        def _cancel():
+            cancelled[0] = True
+            owin.grab_release()
+            owin.destroy()
+
+        btn_frame = tk.Frame(owin)
+        btn_frame.pack(pady=(8, 12))
+        ttk.Button(btn_frame, text="🔄 替换",
+                   command=lambda: _choose("replace")).pack(
+                       side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="➕ 追加",
+                   command=lambda: _choose("append")).pack(
+                       side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="⏭️ 跳过",
+                   command=lambda: _choose("skip")).pack(
+                       side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="⏩ 剩余全部跳过",
+                   command=_skip_remaining).pack(
+                       side=tk.LEFT, padx=(15, 4))
+        ttk.Button(btn_frame, text="取消",
+                   command=_cancel).pack(
+                       side=tk.LEFT, padx=(15, 4))
+
+        owin.protocol("WM_DELETE_WINDOW", _cancel)
+        _show_current()
+        self._center_window(owin)
+        owin.wait_window()
+        return "cancel" if cancelled[0] else per_app
 
     def _inline_handle_http_error(self, aid, e):
         """处理 HTTP 错误。返回 False=失败，None=429重试"""
@@ -658,16 +888,6 @@ class InlineAIGenMixin:
             f"{confidence}{conf_emoji}。")
         flat_content = (f"{ai_prefix} {flat_content}"
                         f" 📅生成于 {date_str}{source_suffix}")
-
-        # 覆盖模式：删除旧 AI 笔记
-        if not self._inline_skip_existing_var.get():
-            data = self.manager.read_notes(aid)
-            notes_list = data.get("notes", [])
-            had_old = any(is_ai_note(n) for n in notes_list)
-            if had_old:
-                data["notes"] = [n for n in notes_list
-                                 if not is_ai_note(n)]
-                self.manager.write_notes(aid, data)
 
         self.manager.create_note(aid, flat_content, flat_content)
         self.root.after(0, lambda a=aid, n=name, c=confidence,

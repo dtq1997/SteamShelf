@@ -110,8 +110,18 @@ class SettingsMixin:
         ttk.Button(upd_row, text="🔔 检查更新", width=12,
                    command=lambda: self._check_update_bg(manual=True, parent=win)).pack(side=tk.LEFT)
         import updater
-        tk.Label(upd_row, text=f"当前版本: v{updater.__version__}",
-                 font=("", 9), fg="#666").pack(side=tk.LEFT, padx=(8, 0))
+        status = getattr(self, '_update_check_result', None)
+        if status == "latest":
+            status_text = f"✅ 已是最新  v{updater.__version__}"
+            status_color = "#4caf50"
+        elif status == "available":
+            status_text = f"🔔 有新版本可用"
+            status_color = "#ff9800"
+        else:
+            status_text = f"当前版本: v{updater.__version__}"
+            status_color = "#666"
+        tk.Label(upd_row, text=status_text,
+                 font=("", 9), fg=status_color).pack(side=tk.LEFT, padx=(8, 0))
 
         ttk.Button(win, text="关闭", command=win.destroy).pack(pady=(10, 15))
         self._center_window(win)

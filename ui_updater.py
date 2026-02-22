@@ -24,17 +24,20 @@ class UpdaterMixin:
         def _bg():
             info = updater.check_update()
             if info and info.get("has_update"):
+                self._update_check_result = "available"
                 self.root.after(0, lambda: self._on_update_available(info))
-            elif manual:
-                def _show():
-                    try:
-                        p = _parent if _parent.winfo_exists() else self.root
-                    except Exception:
-                        p = self.root
-                    messagebox.showinfo(
-                        "检查更新", f"当前已是最新版本 v{updater.__version__}",
-                        parent=p)
-                self.root.after(0, _show)
+            else:
+                self._update_check_result = "latest" if info is None else "failed"
+                if manual:
+                    def _show():
+                        try:
+                            p = _parent if _parent.winfo_exists() else self.root
+                        except Exception:
+                            p = self.root
+                        messagebox.showinfo(
+                            "检查更新", f"当前已是最新版本 v{updater.__version__}",
+                            parent=p)
+                    self.root.after(0, _show)
         threading.Thread(target=bg_thread(_bg), daemon=True).start()
 
     def _on_update_available(self, info):

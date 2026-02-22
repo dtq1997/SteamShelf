@@ -1066,6 +1066,8 @@ class SteamToolboxMain(
             menu.add_command(label="📁 收起全部笔记", command=self._collapse_all_notes)
             menu.add_separator()
             menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
+            if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
+                menu.add_command(label="↩️ 还原库列表", command=self._lib_reset_coll_filters)
             self._smart_popup(menu, event.x_root, event.y_root)
             return
         current_sel = self._games_tree.selection()
@@ -1104,12 +1106,26 @@ class SteamToolboxMain(
         menu.add_command(label="📝 新建笔记", command=self._ui_create_note)
         menu.add_command(label="📥 导入笔记", command=self._ui_import)
         menu.add_command(label="🗑 删除笔记", command=self._ui_delete_notes)
-        menu.add_command(label="📂 打开笔记目录", command=self._ui_open_dir)
-        menu.add_separator()
-        menu.add_command(label="📂 展开全部笔记", command=self._expand_all_notes)
-        menu.add_command(label="📁 收起全部笔记", command=self._collapse_all_notes)
+        # 展开/收起：根据当前状态决定是否显示
+        has_closed = has_open = False
+        for iid in self._lib_tree.get_children():
+            if self._lib_tree.get_children(iid):
+                if self._lib_tree.item(iid, "open"):
+                    has_open = True
+                else:
+                    has_closed = True
+                if has_closed and has_open:
+                    break
+        if has_closed or has_open:
+            menu.add_separator()
+        if has_closed:
+            menu.add_command(label="📂 展开全部笔记", command=self._expand_all_notes)
+        if has_open:
+            menu.add_command(label="📁 收起全部笔记", command=self._collapse_all_notes)
         menu.add_separator()
         menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
+        if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
+            menu.add_command(label="↩️ 还原库列表", command=self._lib_reset_coll_filters)
         self._smart_popup(menu, event.x_root, event.y_root)
 
     def _get_selected_app_id(self):

@@ -92,6 +92,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._viewed_coll_ids = set()  # 触发当前查看的分类 ID
         self._coll_tree.tag_configure("coll_plus", foreground="#2e7d32")
         self._coll_tree.tag_configure("coll_minus", foreground="#c62828")
+        self._coll_tree.tag_configure("coll_empty", foreground="#bbb")
 
         # 绑定选择变化事件（含互斥逻辑）
         self._coll_tree.bind("<<TreeviewSelect>>", self._on_collection_selection_changed)
@@ -102,6 +103,9 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._coll_tree.bind("<B1-Motion>", self._on_coll_drag_motion)
         self._coll_tree.bind("<ButtonRelease-1>", self._drag_scroll_cancel)
         self._coll_tree.bind("<Double-1>", self._on_coll_double_click)
+        self._coll_tree.bind("<Return>", lambda e: self._batch_set_coll_filter("plus"))
+        self._coll_tree.bind("<BackSpace>", lambda e: self._batch_set_coll_filter("minus"))
+        self._coll_tree.bind("<space>", lambda e: self._batch_set_coll_filter("default"))
         self._coll_tree.bind("<Button-2>" if platform.system() == "Darwin" else "<Button-3>",
                               self._on_coll_right_click)
 
@@ -116,6 +120,10 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._toolbar_context = 'game'
 
         style = ttk.Style()
+        # macOS aqua 主题失焦时选中色变浅灰 → 用固定色覆盖
+        style.map("Treeview",
+                  background=[("selected", "#0078d7")],
+                  foreground=[("selected", "white")])
         style.configure("Filter.TCheckbutton", font=("微软雅黑", 8))
         style.configure("Filter.TRadiobutton", font=("微软雅黑", 8))
 
@@ -183,6 +191,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         filter_frame = tk.Frame(right)
         filter_frame.pack(fill=tk.X, pady=(2, 0))
 
+        # ── 收藏夹筛选状态行（有 +/- 时显示，初始隐藏） ──
+        self._coll_filter_status = tk.Label(
+            right, text="", font=("微软雅黑", 8), fg="#555",
+            anchor=tk.W, wraplength=600, justify=tk.LEFT)
+
         # AI 筛选（合并了模型筛选：全部/🤖AI/📝未AI/具体模型名）
         self._ai_filter_var = tk.StringVar(value="全部")
         self._ai_filter_base_values = ["全部", "🤖AI", "📝未AI"]
@@ -244,8 +257,9 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._name_progress_bar.start(15)
         self._name_progress_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0))
 
-        self._lib_status = tk.Label(right, text="", font=("微软雅黑", 8), fg="#666")
-        self._lib_status.pack(side=tk.BOTTOM, anchor=tk.W, pady=(2, 0))
+        self._lib_status = tk.Label(right, text="", font=("微软雅黑", 8), fg="#666",
+                                     anchor=tk.W)
+        self._lib_status.pack(fill=tk.X, pady=(2, 0))
 
         # ── Treeview（统一游戏列表） ──
         lib_list_frame = tk.Frame(right)
@@ -255,6 +269,9 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         style = ttk.Style()
         style.configure("GameList.Treeview", rowheight=24, font=("微软雅黑", 9))
+        style.map("GameList.Treeview",
+                  background=[("selected", "#0078d7")],
+                  foreground=[("selected", "white")])
 
         self._lib_tree = ttk.Treeview(
             lib_list_frame,
@@ -990,16 +1007,13 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
     def _lib_update_status_bar(self, count, owned_count, not_owned_count, notes_total):
         """更新状态栏文本和上传按钮"""
-        if not hasattr(self, '_viewing_collections') or not self._viewing_collections:
-            if owned_count > 0 and not_owned_count > 0:
-                self._lib_status.config(
-                    text=f"共 {count} 个游戏（{owned_count} 已入库，{not_owned_count} 未入库） | {notes_total} 有笔记")
-            elif not_owned_count > 0:
-                self._lib_status.config(
-                    text=f"共 {not_owned_count} 个未入库游戏 | {notes_total} 有笔记")
-            else:
-                self._lib_status.config(
-                    text=f"共 {owned_count} 个游戏 | {notes_total} 有笔记")
+        if owned_count > 0 and not_owned_count > 0:
+            text = f"共 {count} 个游戏（{owned_count} 已入库，{not_owned_count} 未入库）| {notes_total} 有笔记"
+        elif not_owned_count > 0:
+            text = f"共 {not_owned_count} 个未入库游戏 | {notes_total} 有笔记"
+        else:
+            text = f"共 {owned_count} 个游戏 | {notes_total} 有笔记"
+        self._lib_status.config(text=text)
         if self.manager:
             dirty_n = self.manager.dirty_count()
             if hasattr(self, '_upload_all_btn'):
@@ -1028,6 +1042,15 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         """_lib_populate_tree 的内部实现（在 _selection_updating 保护下运行）"""
         if not tree.winfo_exists():
             return
+        # 隐藏树控件避免逐条 insert 触发重绘（30000+ 项时显著加速）
+        tree.grid_remove()
+        try:
+            self._lib_populate_tree_core(tree)
+        finally:
+            tree.grid()
+
+    def _lib_populate_tree_core(self, tree):
+        """实际重建逻辑（在 grid_remove 保护下运行）"""
         # 保存当前选中状态，重建后恢复
         saved_selection = set(tree.selection())
         # 删除可见节点 + detach 过的隐藏节点（防止重建时 iid 冲突）
@@ -1080,6 +1103,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         count = 0
         owned_count = 0
         not_owned_count = 0
+        notes_count = 0
         filtered_games = []
         seen_aids = set()
         self._ai_sort_data = {}  # {aid: (source_rank, vol_rank, conf_rank, qual_rank)}
@@ -1116,13 +1140,15 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
             filtered_games.append(g_copy)
             count += 1
+            if note_count > 0:
+                notes_count += 1
             if is_owned:
                 owned_count += 1
             else:
                 not_owned_count += 1
 
         self._games_data = filtered_games
-        self._lib_update_status_bar(count, owned_count, not_owned_count, len(notes_games))
+        self._lib_update_status_bar(count, owned_count, not_owned_count, notes_count)
 
         # 缓存重建数据（供 L4 快速筛选路径使用）
         self._tree_rebuild_cache = {
@@ -1164,7 +1190,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         # 当前树中可见的顶层项
         visible_now = set(tree.get_children())
         should_visible = set()
-        count = owned_count = not_owned_count = 0
+        count = owned_count = not_owned_count = notes_count = 0
         filtered_games = []
 
         for g in merged:
@@ -1184,6 +1210,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
             should_visible.add(aid)
             count += 1
+            if note_count > 0:
+                notes_count += 1
             if is_owned:
                 owned_count += 1
             else:
@@ -1219,7 +1247,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             if str(g['app_id']).split("::")[0] in should_visible:
                 filtered_games.append(g)
         self._games_data = filtered_games
-        self._lib_update_status_bar(count, owned_count, not_owned_count, len(notes_games))
+        self._lib_update_status_bar(count, owned_count, not_owned_count, notes_count)
 
         if self._sort_columns and self._sort_key_cache:
             self._apply_sort_order(tree)
@@ -1306,15 +1334,6 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         """刷新库列表：CEF 已连接时从 CEF 获取全量，否则扫描本地已安装"""
         self._lib_status.config(text="🔄 正在刷新...")
 
-        # 重置查看状态 + 筛选状态
-        if hasattr(self, '_viewing_collections') and self._viewing_collections:
-            self._viewing_collections = False
-            if hasattr(self, '_update_view_btn_text'):
-                self._update_view_btn_text()
-        if hasattr(self, '_coll_filter_states'):
-            self._coll_filter_states.clear()
-        self._lib_all_games_backup = None
-
         if self._cef_bridge and self._cef_bridge.is_connected():
             # CEF 已连接：重新获取完整游戏列表 + 收藏夹
             self._lib_enhance_name_cache_from_cef()
@@ -1325,6 +1344,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             self._lib_all_games = []
             self._lib_load_initial()
             self._lib_load_collections()
+
+        # 刷新后：如果有活跃 +/- 筛选，重新应用
+        if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
+            self._lib_all_games_backup = None
+            self._apply_coll_filters()
 
     def _lib_toggle_cef(self):
         """连接 / 断开 CEF（库管理用）"""

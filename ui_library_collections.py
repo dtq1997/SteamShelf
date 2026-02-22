@@ -58,6 +58,35 @@ except ImportError:
 class LibraryCollectionsMixin:
     """收藏夹相关方法（Mixin，self 指向 SteamToolboxMain 实例）"""
 
+    def _coll_is_empty(self, col_id):
+        """当前筛选模式下该分类游戏数是否为 0"""
+        data = getattr(self, '_coll_data_cache', {}).get(col_id)
+        if not data:
+            return False
+        mode = getattr(self, '_coll_filter_var', None)
+        mode = mode.get() if mode else "已入库"
+        if mode == "已入库":
+            return data.get('owned_count', 0) == 0
+        if mode == "未入库":
+            return data.get('not_owned_count', 0) == 0
+        return data.get('total_count', 0) == 0
+
+    def _coll_item_tags(self, col_id, state):
+        """根据筛选状态 + 是否为空，返回 (image, tags)"""
+        if state == 'plus':
+            img = self._img_coll_plus
+        elif state == 'minus':
+            img = self._img_coll_minus
+        else:
+            img = self._img_coll_default
+        if self._coll_is_empty(col_id):
+            return img, ("coll_empty",)
+        if state == 'plus':
+            return img, ("coll_plus",)
+        if state == 'minus':
+            return img, ("coll_minus",)
+        return img, ()
+
     def _lib_load_collections(self):
         """加载 Steam 收藏夹
 
@@ -149,9 +178,11 @@ class LibraryCollectionsMixin:
             not_owned_count = len(not_owned)
             total_count = cef_count + not_owned_count
 
-            # 按筛选模式决定是否显示此收藏夹
-            if show_mode == "未入库" and not_owned_count == 0:
-                continue  # 未入库模式：跳过没有未入库游戏的收藏夹
+            # 判断当前模式下是否为空分类
+            _mode_count = (cef_count if show_mode == "已入库"
+                           else not_owned_count if show_mode == "未入库"
+                           else total_count)
+            _is_empty = (_mode_count == 0)
 
             # 构建标题（简洁格式）
             if is_dynamic:
@@ -176,9 +207,11 @@ class LibraryCollectionsMixin:
             _img = (self._img_coll_plus if _st == 'plus'
                     else self._img_coll_minus if _st == 'minus'
                     else self._img_coll_default)
-            _tag = ("coll_plus",) if _st == 'plus' else ("coll_minus",) if _st == 'minus' else ()
+            _tag = ["coll_plus"] if _st == 'plus' else ["coll_minus"] if _st == 'minus' else []
+            if _is_empty:
+                _tag.append("coll_empty")
             node = coll_tree.insert("", tk.END, iid=col_id, text=label,
-                                    image=_img, tags=_tag)
+                                    image=_img, tags=tuple(_tag))
 
             if not hasattr(self, '_coll_data_cache'):
                 self._coll_data_cache = {}
@@ -354,9 +387,6 @@ class LibraryCollectionsMixin:
             cef_games.sort(key=lambda g: steam_sort_key(g['name']))
             self._lib_all_games = cef_games
             self._lib_populate_tree(force_rebuild=True)
-            installed = sum(1 for g in cef_games if g.get('installed'))
-            self._lib_status.config(
-                text=f"共 {len(cef_games)} 个游戏（{installed} 已安装）— CEF")
         except Exception as e:
             print(f"[库管理] CEF 加载游戏列表失败: {e}")
             self._lib_status.config(text=f"⚠️ CEF 游戏列表加载失败: {e}")
@@ -423,18 +453,68 @@ class LibraryCollectionsMixin:
         new_state = {'default': 'plus', 'plus': 'minus', 'minus': 'default'}[current]
         self._coll_filter_states[col_id] = new_state
 
-        if new_state == 'plus':
-            img, tags = self._img_coll_plus, ("coll_plus",)
-        elif new_state == 'minus':
-            img, tags = self._img_coll_minus, ("coll_minus",)
-        else:
-            img, tags = self._img_coll_default, ()
+        img, tags = self._coll_item_tags(col_id, new_state)
         try:
             self._coll_tree.item(col_id, image=img, tags=tags)
         except Exception:
             pass
 
         self._apply_coll_filters()
+
+    def _batch_set_coll_filter(self, state):
+        """批量设置选中收藏夹的筛选状态（'plus'/'minus'/'default'）"""
+        sel = self._coll_tree.selection()
+        if not sel:
+            return
+        for col_id in sel:
+            self._coll_filter_states[col_id] = state
+            img, tags = self._coll_item_tags(col_id, state)
+            try:
+                self._coll_tree.item(col_id, image=img, tags=tags)
+            except Exception:
+                pass
+        self._apply_coll_filters()
+
+    def _lib_reset_coll_filters(self):
+        """还原库列表：清除所有 ＋/－ 筛选状态"""
+        for col_id in list(self._coll_filter_states):
+            img, tags = self._coll_item_tags(col_id, 'default')
+            try:
+                self._coll_tree.item(col_id, image=img, tags=tags)
+            except Exception:
+                pass
+        self._coll_filter_states.clear()
+        self._viewing_collections = False
+        self._viewed_coll_ids = set()
+        self._lib_all_games_backup = None
+        self._hide_coll_filter_status()
+        self._apply_coll_filters()
+
+    def _update_coll_filter_status(self, plus_ids, minus_ids, game_count):
+        """更新筛选状态标签（列表上方）"""
+        cache = getattr(self, '_coll_data_cache', {})
+        parts = []
+        for prefix, ids in [("＋", plus_ids), ("－", minus_ids)]:
+            if not ids:
+                continue
+            names = []
+            for cid in ids:
+                data = cache.get(cid, {})
+                name = data.get('name', cid)
+                if data.get('is_dynamic'):
+                    name = f"{name}（动态）"
+                names.append(name)
+            parts.append(f"{prefix} {', '.join(names)}")
+        text = " ／ ".join(parts)
+        self._coll_filter_status.config(text=text)
+        if not self._coll_filter_status.winfo_ismapped():
+            self._coll_filter_status.pack(fill=tk.X, pady=(2, 0),
+                                          before=self._lib_status)
+
+    def _hide_coll_filter_status(self):
+        """隐藏筛选状态标签"""
+        if self._coll_filter_status.winfo_ismapped():
+            self._coll_filter_status.pack_forget()
 
     def _update_view_btn_text(self):
         """查看/还原状态跟踪（工具条已移除，保留方法避免调用方报错）"""
@@ -455,16 +535,18 @@ class LibraryCollectionsMixin:
         # 重置所有
         for cid in list(self._coll_filter_states):
             self._coll_filter_states[cid] = 'default'
+            img, tags = self._coll_item_tags(cid, 'default')
             try:
-                self._coll_tree.item(cid, image=self._img_coll_default, tags=())
+                self._coll_tree.item(cid, image=img, tags=tags)
             except Exception:
                 pass
         # 非独占状态时设为 plus
         if not is_sole_plus:
             self._coll_filter_states[item] = 'plus'
             self._viewed_coll_ids = {item}
+            img, tags = self._coll_item_tags(item, 'plus')
             try:
-                self._coll_tree.item(item, image=self._img_coll_plus, tags=("coll_plus",))
+                self._coll_tree.item(item, image=img, tags=tags)
             except Exception:
                 pass
         else:
@@ -477,6 +559,7 @@ class LibraryCollectionsMixin:
         self._viewing_collections = False
         self._viewed_coll_ids = set()
         self._update_view_btn_text()
+        self._hide_coll_filter_status()
         if self._lib_all_games_backup is not None:
             self._lib_all_games = self._lib_all_games_backup
             self._lib_all_games_backup = None
@@ -550,9 +633,11 @@ class LibraryCollectionsMixin:
         show_mode = getattr(self, '_coll_filter_var', None)
         show_mode = show_mode.get() if show_mode else "已入库"
 
+        implicit_all = False
         if not plus_ids and not minus_ids:
             if show_mode != "已入库" and hasattr(self, '_coll_data_cache') and self._coll_data_cache:
                 plus_ids = list(self._coll_data_cache.keys())
+                implicit_all = True
             else:
                 self._coll_filter_reset_view()
                 return
@@ -605,15 +690,10 @@ class LibraryCollectionsMixin:
         self._bg_resolve_visible_names()
 
         self._update_view_btn_text()
-        plus_n = len(plus_ids)
-        minus_n = len(minus_ids)
-        parts = []
-        if plus_n:
-            parts.append(f"＋{plus_n}")
-        if minus_n:
-            parts.append(f"－{minus_n}")
-        self._lib_status.config(
-            text=f"筛选: {' / '.join(parts)} | 共 {len(games)} 个游戏")
+        if implicit_all:
+            self._hide_coll_filter_status()
+        else:
+            self._update_coll_filter_status(plus_ids, minus_ids, len(games))
 
     def _lib_toggle_view_collection(self):
         """查看/取消收藏夹筛选
@@ -628,8 +708,9 @@ class LibraryCollectionsMixin:
             # ── 还原模式：清除＋/－，让 _apply_coll_filters 根据 show_mode 决定 ──
             for col_id in list(self._coll_filter_states):
                 self._coll_filter_states[col_id] = 'default'
+                img, tags = self._coll_item_tags(col_id, 'default')
                 try:
-                    self._coll_tree.item(col_id, image=self._img_coll_default, tags=())
+                    self._coll_tree.item(col_id, image=img, tags=tags)
                 except Exception:
                     pass
             self._coll_filter_states.clear()
@@ -646,8 +727,9 @@ class LibraryCollectionsMixin:
                 # 重置旧筛选状态
                 for col_id in list(self._coll_filter_states):
                     self._coll_filter_states[col_id] = 'default'
+                    img, tags = self._coll_item_tags(col_id, 'default')
                     try:
-                        self._coll_tree.item(col_id, image=self._img_coll_default, tags=())
+                        self._coll_tree.item(col_id, image=img, tags=tags)
                     except Exception:
                         pass
                 self._coll_filter_states.clear()
@@ -656,9 +738,9 @@ class LibraryCollectionsMixin:
             for col_id in sel:
                 if self._coll_filter_states.get(col_id, 'default') == 'default':
                     self._coll_filter_states[col_id] = 'plus'
+                    img, tags = self._coll_item_tags(col_id, 'plus')
                     try:
-                        self._coll_tree.item(col_id, image=self._img_coll_plus,
-                                             tags=("coll_plus",))
+                        self._coll_tree.item(col_id, image=img, tags=tags)
                     except Exception:
                         pass
                     changed = True
@@ -1118,6 +1200,8 @@ class LibraryCollectionsMixin:
 
         menu.add_separator()
         menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
+        if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
+            menu.add_command(label="↩️ 还原库列表", command=self._lib_reset_coll_filters)
 
         self._smart_popup(menu, event.x_root, event.y_root)
 
