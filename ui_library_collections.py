@@ -130,6 +130,9 @@ class LibraryCollectionsMixin:
         else:
             self._lib_render_collections_local(coll_tree)
 
+        # 自动更新 expression 类型的绑定分类
+        self._auto_update_expression_collections()
+
     def _lib_render_collections_cef(self, coll_tree, cef_collections: dict):
         """使用 CEF 实时数据渲染收藏夹列表
 
@@ -421,6 +424,13 @@ class LibraryCollectionsMixin:
     def _show_create_collection_menu(self, event=None):
         """弹出创建分类菜单（统一所有收藏夹创建入口）"""
         menu = tk.Menu(self.root, tearoff=0)
+        # 有活跃 +/- 筛选时，显示"保存筛选为分类"
+        active = [s for s in self._coll_filter_states.values()
+                  if s != 'default']
+        if len(active) >= 2:
+            menu.add_command(label="📐 将当前筛选保存为分类",
+                             command=self._save_filter_as_collection)
+            menu.add_separator()
         menu.add_command(label="➕ 新建空分类", command=self._lib_new_collection)
         menu.add_separator()
         menu.add_command(label="🤖 AI 智能筛选", command=self.ai_search_ui)
@@ -446,6 +456,210 @@ class LibraryCollectionsMixin:
             return
         messagebox.showinfo("提示", f"分类 \"{name.strip()}\" 创建功能将在后续版本完善。",
                             parent=self.root)
+
+    # ── 筛选表达式保存为分类 ──
+
+    def _save_filter_as_collection(self):
+        """将当前筛选表达式保存为 Steam 静态分类（绑定来源，可手动更新）"""
+        if not self._ensure_collections_core():
+            return
+        data = self._collections_core.load_json()
+        if data is None:
+            return
+
+        # 收集筛选状态
+        source_params = self._build_expression_params()
+        app_ids = self._eval_filter_expression(source_params)
+        if not app_ids:
+            messagebox.showwarning("提示", "当前筛选结果为空，无法创建分类。",
+                                   parent=self.root)
+            return
+
+        # 生成默认名称
+        default_name = self._build_expression_display(source_params)
+        name = simpledialog.askstring(
+            "保存筛选为分类",
+            f"当前筛选匹配 {len(app_ids)} 个游戏。\n请输入分类名称：",
+            initialvalue=default_name, parent=self.root)
+        if not name or not name.strip():
+            return
+        name = name.strip()
+
+        col_id = self._collections_core.add_static_collection(
+            data, name, [int(a) for a in app_ids if a.isdigit()])
+        self._collections_core.save_collection_source(
+            col_id, 'expression', source_params, default_name, 'auto')
+        self._save_and_sync(data, backup_description=f"保存筛选表达式为分类「{name}」")
+        self._ui_refresh()
+        messagebox.showinfo("完成",
+            f"已创建分类「{name}」（{len(app_ids)} 个游戏）\n"
+            "已绑定筛选表达式，相关分类变化时自动更新。\n"
+            "右键「更新上游分类」可刷新引用的绑定来源。",
+            parent=self.root)
+
+    def _build_expression_params(self):
+        """收集当前所有筛选状态为 source_params dict"""
+        return {
+            'coll_filter_states': {
+                cid: s for cid, s in self._coll_filter_states.items()
+                if s != 'default'},
+            'coll_ops_plus': list(self._coll_ops_plus),
+            'coll_ops_minus': list(self._coll_ops_minus),
+            'coll_filter_var': self._coll_filter_var.get(),
+            'filters': self._lib_read_filter_state(),
+            'type_filter': list(self._type_filter),
+            'search_q': self._lib_search_var.get().strip(),
+            'search_mode': self._main_search_mode.get(),
+        }
+
+    def _eval_filter_expression(self, params):
+        """求值筛选表达式，返回 app_id 字符串列表"""
+        cache = getattr(self, '_coll_data_cache', {})
+        if not cache:
+            return []
+        states = params.get('coll_filter_states', {})
+        plus_ids = [c for c, s in states.items() if s == 'plus']
+        minus_ids = [c for c, s in states.items() if s == 'minus']
+        ops_p = params.get('coll_ops_plus', [True] * max(0, len(plus_ids) - 1))
+        ops_m = params.get('coll_ops_minus', [True] * max(0, len(minus_ids) - 1))
+
+        plus_o, plus_n = self._eval_coll_expr(plus_ids, ops_p)
+        minus_o, minus_n = self._eval_coll_expr(minus_ids, ops_m)
+
+        if plus_ids:
+            owned, not_owned = plus_o, plus_n
+        else:
+            owned = set(str(g['app_id']) for g in (self._lib_all_games_backup or self._lib_all_games) if g.get('owned'))
+            not_owned = set()
+        owned -= minus_o
+        not_owned -= minus_n
+
+        show = params.get('coll_filter_var', '已入库')
+        if show == '已入库':
+            candidates = owned
+        elif show == '全部':
+            candidates = owned | not_owned
+        else:
+            candidates = not_owned
+
+        # 附加筛选（AI/类型/搜索）
+        filters = params.get('filters', {})
+        type_f = set(params.get('type_filter', []))
+        sq = params.get('search_q', '').lower()
+        sm = params.get('search_mode', 'name')
+        notes_games, ai_map, sync_map = self._lib_load_notes_data()
+
+        result = []
+        for aid in candidates:
+            has_ai = aid in ai_map
+            has_notes = aid in notes_games
+            is_dirty = self.manager.is_dirty(aid) if self.manager and has_notes else False
+            is_up = sync_map.get(aid) == 3
+            name = self._game_name_cache.get(aid, f"AppID {aid}")
+            # 类型筛选
+            if type_f and len(type_f) < len(self._ALL_TYPES):
+                g_type = self._guess_type_for_aid(aid)
+                if g_type not in type_f:
+                    continue
+            if not self._lib_should_include_game(
+                    aid, has_ai, is_dirty, is_up, ai_map, filters,
+                    sq, sm, name):
+                continue
+            result.append(aid)
+        return result
+
+    def _guess_type_for_aid(self, aid):
+        """根据缓存猜测 app 类型名"""
+        for g in (self._lib_all_games_backup or self._lib_all_games):
+            if str(g.get('app_id')) == aid:
+                t = g.get('type') or g.get('app_type') or g.get('nAppType') or 1
+                return self._get_type_name(t)
+        return "Game"
+
+    def _build_expression_display(self, params):
+        """生成筛选表达式的简短显示名"""
+        cache = getattr(self, '_coll_data_cache', {})
+        states = params.get('coll_filter_states', {})
+        parts = []
+        for sign in ('plus', 'minus'):
+            ids = [c for c, s in states.items() if s == sign]
+            if not ids:
+                continue
+            prefix = "＋" if sign == 'plus' else "－"
+            names = [cache.get(c, {}).get('name', c)[:8] for c in ids]
+            parts.append(f"{prefix}{' '.join(names)}")
+        # 附加筛选摘要
+        f = params.get('filters', {})
+        if f.get('filter_mode') not in (None, '全部'):
+            parts.append(f['filter_mode'])
+        if params.get('search_q'):
+            parts.append(f"🔍{params['search_q'][:6]}")
+        return " | ".join(parts) or "筛选表达式"
+
+    def _auto_update_expression_collections(self):
+        """自动更新所有 expression 类型的绑定分类（_lib_load_collections 末尾调用）"""
+        if getattr(self, '_expression_updating', False):
+            return
+        if not self._collections_core:
+            return
+        all_sources = self._collections_core._get_all_sources()
+        expr_sources = {k: v for k, v in all_sources.items()
+                        if v.get('source_type') == 'expression'}
+        if not expr_sources:
+            return
+
+        data = self._collections_core.load_json()
+        if data is None:
+            return
+
+        changed = False
+        self._expression_updating = True
+        try:
+            for col_id, src_info in expr_sources.items():
+                params = src_info.get('source_params', {})
+                new_ids = set(self._eval_filter_expression(params))
+                # 找到当前 entry 比较
+                for entry in data:
+                    if entry[0] != f"user-collections.{col_id}":
+                        continue
+                    meta = entry[1]
+                    if meta.get("is_deleted") or "value" not in meta:
+                        break
+                    val = json.loads(meta['value'])
+                    old_ids = set(str(a) for a in val.get('added', []))
+                    if new_ids != old_ids:
+                        int_ids = [int(a) for a in new_ids if a.isdigit()]
+                        val['added'] = int_ids
+                        meta['value'] = json.dumps(
+                            val, ensure_ascii=False, separators=(',', ':'))
+                        meta['timestamp'] = int(time.time())
+                        self._collections_core.queue_cef_upsert(
+                            col_id, val.get('name', ''), int_ids)
+                        changed = True
+                    break
+        finally:
+            self._expression_updating = False
+
+        if changed:
+            self._save_and_sync(data, backup_description="自动更新筛选表达式分类")
+
+    def _update_expression_upstream(self, col_id, source_info):
+        """对 expression 分类点"更新来源"→ 更新其引用的上游绑定分类"""
+        params = source_info.get('source_params', {})
+        states = params.get('coll_filter_states', {})
+        upstream_ids = set(states.keys())
+        if not upstream_ids:
+            return
+        # 筛选出有自己来源绑定的上游分类
+        all_src = self._collections_core._get_all_sources()
+        linked = {k for k in upstream_ids if k in all_src
+                  and all_src[k].get('source_type') != 'expression'}
+        if linked:
+            self._update_all_cached_sources(col_ids=linked)
+        else:
+            messagebox.showinfo("提示",
+                "该表达式引用的分类均无绑定来源，无需更新。",
+                parent=self.root)
 
     def _cycle_coll_filter(self, col_id):
         """循环收藏夹筛选状态：default → plus → minus → default"""
@@ -490,31 +704,125 @@ class LibraryCollectionsMixin:
         self._hide_coll_filter_status()
         self._apply_coll_filters()
 
+    def _toggle_coll_op(self, group, index, event=None):
+        """点击第 index 个运算符切换 ∪↔∩"""
+        ops = self._coll_ops_plus if group == 'plus' else self._coll_ops_minus
+        if 0 <= index < len(ops):
+            ops[index] = not ops[index]
+        self._apply_coll_filters()
+
     def _update_coll_filter_status(self, plus_ids, minus_ids, game_count):
-        """更新筛选状态标签（列表上方）"""
+        """更新筛选状态栏（Text 控件，自动换行，运算符可点击）"""
+        t = self._coll_filter_status
+        t.config(state=tk.NORMAL)
+        t.delete("1.0", tk.END)
+        # 配置 tag 样式
+        t.tag_configure("txt", foreground="#555")
+        t.tag_configure("op", foreground="#1a73e8",
+                         font=("微软雅黑", 8, "bold"))
         cache = getattr(self, '_coll_data_cache', {})
-        parts = []
-        for prefix, ids in [("＋", plus_ids), ("－", minus_ids)]:
+        first = True
+        for prefix, ids, ops, grp in [
+            ("＋", plus_ids, self._coll_ops_plus, "plus"),
+            ("－", minus_ids, self._coll_ops_minus, "minus"),
+        ]:
             if not ids:
                 continue
-            names = []
-            for cid in ids:
-                data = cache.get(cid, {})
-                name = data.get('name', cid)
-                if data.get('is_dynamic'):
-                    name = f"{name}（动态）"
-                names.append(name)
-            parts.append(f"{prefix} {', '.join(names)}")
-        text = " ／ ".join(parts)
-        self._coll_filter_status.config(text=text)
-        if not self._coll_filter_status.winfo_ismapped():
-            self._coll_filter_status.pack(fill=tk.X, pady=(2, 0),
-                                          before=self._lib_status)
+            names = [cache.get(c, {}).get('name', c) for c in ids]
+            if not first:
+                t.insert(tk.END, "／", "txt")
+            first = False
+            t.insert(tk.END, prefix, "txt")
+            if len(names) == 1:
+                t.insert(tk.END, names[0], "txt")
+            else:
+                self._render_ops_expr(t, names, ops, grp)
+        t.config(state=tk.DISABLED)
+        # 先 pack 让控件获得实际宽度，再算显示行数
+        if not t.winfo_ismapped():
+            t.pack(fill=tk.X, pady=(2, 0), before=self._lib_status)
+        t.update_idletasks()
+        try:
+            dl = t.count("1.0", "end-1c", "displaylines")
+            t.config(height=max(1, (dl[0] if dl else 0) + 1))
+        except Exception:
+            t.config(height=2)
+
+    def _render_ops_expr(self, t, names, ops, grp):
+        """向 Text 控件插入带括号的表达式"""
+        mixed = any(ops) and not all(ops)
+        groups, between = [[0]], []
+        for i, is_union in enumerate(ops):
+            if is_union:
+                between.append(i)
+                groups.append([i + 1])
+            else:
+                groups[-1].append(i + 1)
+        for gi, group in enumerate(groups):
+            paren = mixed and len(group) > 1
+            if paren:
+                t.insert(tk.END, "(", "txt")
+            for j, ni in enumerate(group):
+                t.insert(tk.END, names[ni], "txt")
+                if j < len(group) - 1:
+                    self._insert_op_tag(t, ni, grp)
+            if paren:
+                t.insert(tk.END, ")", "txt")
+            if gi < len(between):
+                self._insert_op_tag(t, between[gi], grp)
+
+    def _insert_op_tag(self, t, op_idx, grp):
+        """插入一个可点击的运算符到 Text 控件"""
+        ops = self._coll_ops_plus if grp == 'plus' else self._coll_ops_minus
+        sym = "∪" if ops[op_idx] else "∩"
+        tag = f"op_{grp}_{op_idx}"
+        t.insert(tk.END, sym, ("op", tag))
+        t.tag_bind(tag, "<Button-1>",
+                   lambda e, g=grp, i=op_idx: self._toggle_coll_op(g, i))
 
     def _hide_coll_filter_status(self):
-        """隐藏筛选状态标签"""
+        """隐藏筛选状态栏"""
         if self._coll_filter_status.winfo_ismapped():
             self._coll_filter_status.pack_forget()
+
+    def _eval_coll_expr(self, ids, ops):
+        """求值收藏夹表达式：按∪切分成∩组，组内交集，组间并集
+        已删除的收藏夹（不在 cache 中）会被跳过，而非视为空集。
+        """
+        if not ids:
+            return set(), set()
+        cache = self._coll_data_cache
+        # 过滤掉已删除的 ID，同时调整 ops
+        valid_ids, valid_ops = [], []
+        for i, cid in enumerate(ids):
+            if cid in cache:
+                if valid_ids and i - 1 < len(ops):
+                    valid_ops.append(ops[i - 1])
+                valid_ids.append(cid)
+        if not valid_ids:
+            return set(), set()
+        # 按∪切分成∩组
+        groups = [[0]]
+        for i, is_union in enumerate(valid_ops):
+            if is_union:
+                groups.append([i + 1])
+            else:
+                groups[-1].append(i + 1)
+        result_o, result_n = set(), set()
+        for group in groups:
+            go = gn = None
+            for ni in group:
+                data = cache.get(valid_ids[ni], {})
+                o = set(data.get('owned_app_ids', []))
+                n = set(data.get('not_owned_app_ids', []))
+                if go is None:
+                    go, gn = o, n
+                else:
+                    go &= o
+                    gn &= n
+            result_o |= go
+            result_n |= gn
+        return result_o, result_n
 
     def _update_view_btn_text(self):
         """查看/还原状态跟踪（工具条已移除，保留方法避免调用方报错）"""
@@ -648,19 +956,17 @@ class LibraryCollectionsMixin:
         if self._lib_all_games_backup is None:
             self._lib_all_games_backup = self._lib_all_games
 
-        plus_owned = set()
-        plus_not_owned = set()
-        for cid in plus_ids:
-            data = self._coll_data_cache.get(cid, {})
-            plus_owned.update(data.get('owned_app_ids', []))
-            plus_not_owned.update(data.get('not_owned_app_ids', []))
+        # 同步 ops 列表长度
+        for ids, attr in [(plus_ids, '_coll_ops_plus'), (minus_ids, '_coll_ops_minus')]:
+            needed = max(0, len(ids) - 1)
+            ops = getattr(self, attr)
+            if len(ops) != needed:
+                setattr(self, attr, [True] * needed)
 
-        minus_owned = set()
-        minus_not_owned = set()
-        for cid in minus_ids:
-            data = self._coll_data_cache.get(cid, {})
-            minus_owned.update(data.get('owned_app_ids', []))
-            minus_not_owned.update(data.get('not_owned_app_ids', []))
+        plus_owned, plus_not_owned = self._eval_coll_expr(
+            plus_ids, self._coll_ops_plus)
+        minus_owned, minus_not_owned = self._eval_coll_expr(
+            minus_ids, self._coll_ops_minus)
 
         if plus_ids:
             owned_app_ids = plus_owned
@@ -1150,10 +1456,16 @@ class LibraryCollectionsMixin:
                 mode_label = mode_labels.get(
                     source_info.get('update_mode', ''), '增量+辅助')
                 menu.add_separator()
-                menu.add_command(
-                    label=f"🔄 从来源更新「{coll_name}」({mode_label})",
-                    command=lambda cid=col_id, si=source_info:
-                        self._update_from_cached_source(cid, si))
+                if source_info.get('source_type') == 'expression':
+                    menu.add_command(
+                        label=f"🔄 更新上游分类「{coll_name}」",
+                        command=lambda cid=col_id, si=source_info:
+                            self._update_expression_upstream(cid, si))
+                else:
+                    menu.add_command(
+                        label=f"🔄 从来源更新「{coll_name}」({mode_label})",
+                        command=lambda cid=col_id, si=source_info:
+                            self._update_from_cached_source(cid, si))
                 menu.add_command(
                     label=f"🔗✂️ 解绑来源「{source_info.get('source_display_name', '')[:20]}」",
                     command=lambda cid=col_id, cn=coll_name:

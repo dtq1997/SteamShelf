@@ -320,6 +320,10 @@ class LibrarySourceUpdateMixin:
                 ids, error = \
                     self._collections_core.fetch_igdb_games_by_company(
                         company_id, company_name, progress_cb)
+            elif src_type == 'expression':
+                ids = self._eval_filter_expression(src_params)
+                if not ids:
+                    error = "表达式求值结果为空（相关分类可能已删除）"
             else:
                 error = f"未知的来源类型: {src_type}"
         except Exception as e:
