@@ -337,6 +337,8 @@ class ProgressWindow:
                      font=("", 8), fg="#888").pack(padx=30, pady=(0, 10))
 
         self._parent = parent
+        # 防止用户点 X 关闭时 grab 泄漏
+        self.win.protocol("WM_DELETE_WINDOW", self.close)
 
     def update(self, value=None, status=None, detail=None):
         """线程安全更新进度"""

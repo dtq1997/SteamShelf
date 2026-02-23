@@ -112,8 +112,8 @@ class CollectionsCore(IGDBMixin, ScraperMixin):
             if os.path.exists(old_path) and not os.path.exists(new_path):
                 try:
                     shutil.move(old_path, new_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[收藏夹] 迁移 {old_name} 失败: {e}")
 
     def _fetch_page(self, url, headers, timeout=30, max_redirects=5):
         """发送 HTTP GET 请求，手动处理重定向

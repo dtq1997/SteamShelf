@@ -142,14 +142,14 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         ttk.Checkbutton(title_frame, text="⬆ 有改动",
                         variable=self._dirty_filter_var,
                         style="Filter.TCheckbutton",
-                        command=lambda: self._lib_populate_tree()
+                        command=lambda: self._lib_schedule_tree_rebuild()
                         ).pack(side=tk.LEFT, padx=(8, 0))
 
         self._uploading_filter_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(title_frame, text="☁️⬆ 未上传",
                         variable=self._uploading_filter_var,
                         style="Filter.TCheckbutton",
-                        command=lambda: self._lib_populate_tree()
+                        command=lambda: self._lib_schedule_tree_rebuild()
                         ).pack(side=tk.LEFT, padx=(4, 0))
 
         # 工具按钮（右侧对齐：全选最右，全部上传在其左，仅有改动时显示）
@@ -216,7 +216,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             filter_frame, textvariable=self._source_filter_var, width=7,
             values=["来源", "📡 联网", "📚 本地"], state='readonly')
         self._source_filter_combo.bind("<<ComboboxSelected>>",
-                                        lambda e: self._lib_populate_tree())
+                                        lambda e: self._lib_schedule_tree_rebuild())
 
         self._vol_filter_var = tk.StringVar(value="信息量")
         self._vol_filter_combo = ttk.Combobox(
@@ -233,7 +233,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             values=["确信度", "🟢 很高", "🔵 较高", "🟡 中等", "🟠 较低", "🔴 很低"],
             state='readonly')
         self._conf_filter_combo.bind("<<ComboboxSelected>>",
-                                      lambda e: self._lib_populate_tree())
+                                      lambda e: self._lib_schedule_tree_rebuild())
 
         self._qual_filter_var = tk.StringVar(value="质量")
         self._qual_filter_combo = ttk.Combobox(
@@ -241,7 +241,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             values=["质量", "❓ 未评估", "💎 相当好", "✨ 较好", "➖ 中等", "👎 较差",
                     "💀 相当差"], state='readonly')
         self._qual_filter_combo.bind("<<ComboboxSelected>>",
-                                      lambda e: self._lib_populate_tree())
+                                      lambda e: self._lib_schedule_tree_rebuild())
 
         self._sub_filters_visible = False
         self._qual_filter_visible = False
@@ -563,8 +563,10 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 for g in games:
                     if 'owned' not in g:
                         g['owned'] = True
-                self._lib_all_games = games
-                self.root.after(0, self._lib_schedule_tree_rebuild)
+                def _apply(g=games):
+                    self._lib_all_games = g
+                    self._lib_schedule_tree_rebuild()
+                self.root.after(0, _apply)
             except Exception as e:
                 msg = str(e)
                 print(f"[库管理] 加载失败: {msg}")
@@ -593,6 +595,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             else:
                 self._lib_tree.heading(f"#{i+1}",
                     command=lambda c=col: self._lib_sort_column(c))
+
+    @staticmethod
+    def _get_app_type(g):
+        """从游戏 dict 提取 app_type 值（SSOT：唯一的类型字段解析入口）"""
+        return g.get('type') or g.get('app_type') or g.get('nAppType') or 1
 
     @staticmethod
     def _get_type_name(app_type):
@@ -808,8 +815,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         """判断单个游戏是否通过所有筛选条件（返回 True 表示应显示）"""
         # 类型筛选
         if self._type_filter and len(self._type_filter) < len(self._ALL_TYPES) and g:
-            app_type = g.get('type') or g.get('app_type') or g.get('nAppType') or 1
-            if self._get_type_name(app_type) not in self._type_filter:
+            if self._get_type_name(self._get_app_type(g)) not in self._type_filter:
                 return False
         f = filters
         # 笔记状态筛选
@@ -958,9 +964,10 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
     def _lib_insert_game_row(self, tree, aid, g, name, is_owned, has_ai,
                               is_dirty, is_uploading, ai_notes_map,
-                              notes_col, source_col, note_count, filter_mode):
+                              notes_col, source_col, note_count, filter_mode,
+                              latest_ts=0):
         """插入一行游戏到树视图（含子笔记节点），返回 enriched 游戏字典"""
-        app_type = g.get('type') or g.get('app_type') or g.get('nAppType') or 1
+        app_type = self._get_app_type(g)
         type_str = self._get_type_name(app_type)
 
         # 改动/上传标记
@@ -981,20 +988,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         else:
             tag = "normal"
 
-        # 读取笔记数据（用于子节点 + 日期列）
-        note_data = None
-        latest_ts = 0
-        if note_count > 0:
-            try:
-                note_data = self.manager.read_notes_cached(aid)
-                for note in note_data.get("notes", []):
-                    ts = note.get("time_modified", note.get("time_created", 0))
-                    if ts > latest_ts:
-                        latest_ts = ts
-            except Exception:
-                pass
-
-        # 游戏行日期 = 最新笔记日期
+        # 游戏行日期 = 最新笔记日期（latest_ts 由 scan_all 预计算）
         date_col = datetime.fromtimestamp(latest_ts).strftime("%Y-%m-%d") if latest_ts else ""
 
         # 回填发行日期：CEF 无数据时从 Store API 缓存解析
@@ -1189,9 +1183,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             notes_col, source_col = self._lib_build_display_columns(
                 aid, has_ai, ai_notes_map, note_count)
 
+            latest_ts = notes_games[aid]['latest_ts'] if has_notes else 0
             g_copy = self._lib_insert_game_row(
                 tree, aid, g, name, is_owned, has_ai, is_dirty, is_uploading,
-                ai_notes_map, notes_col, source_col, note_count, filter_mode)
+                ai_notes_map, notes_col, source_col, note_count, filter_mode,
+                latest_ts)
 
             filtered_games.append(g_copy)
             count += 1

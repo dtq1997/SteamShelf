@@ -14,6 +14,7 @@ Python ctypes.CDLL 加载 libsteam_api 后，Steam 客户端通过 IPC 管道检
 
 import ctypes
 import glob
+import logging
 import multiprocessing as mp
 import os
 import platform
@@ -125,8 +126,8 @@ def _worker_handle_command(cmd, dll, remote_storage, result_queue):
                        data, len(data))
             try:
                 dll.SteamAPI_RunCallbacks()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"[Cloud] RunCallbacks failed after write: {e}")
             result_queue.put(("write_result", bool(res)))
         except Exception:
             result_queue.put(("write_result", False))
@@ -140,8 +141,8 @@ def _worker_handle_command(cmd, dll, remote_storage, result_queue):
             res = func(remote_storage, filename.encode("utf-8"))
             try:
                 dll.SteamAPI_RunCallbacks()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"[Cloud] RunCallbacks failed after delete: {e}")
             result_queue.put(("delete_result", bool(res)))
         except Exception:
             result_queue.put(("delete_result", False))
@@ -169,8 +170,8 @@ def _worker_handle_command(cmd, dll, remote_storage, result_queue):
             if (i + 1) % 10 == 0 or i == total - 1:
                 try:
                     cb_func()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.warning(f"[Cloud] RunCallbacks failed in batch: {e}")
                 result_queue.put(("batch_progress", i + 1, total, ok, fail))
         result_queue.put(("batch_done", ok, fail))
 

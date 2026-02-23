@@ -33,6 +33,7 @@
 """
 
 import json
+import os
 import threading
 import time
 import tkinter as tk
@@ -236,8 +237,11 @@ class LibraryCollectionsMixin:
                 'not_owned_count': not_owned_count,
             }
 
-        # 收藏夹渲染完毕，CEF 批量查询未入库游戏的 appOverview
-        self._cef_fetch_unowned_overviews()
+        # 收藏夹渲染完毕，后台批量查询未入库游戏的 appOverview（避免阻塞 UI）
+        def _bg_fetch():
+            self._cef_fetch_unowned_overviews()
+            self.root.after(0, self._lib_schedule_tree_rebuild)
+        threading.Thread(target=bg_thread(_bg_fetch), daemon=True).start()
         # 启动后台获取所有未入库游戏信息（Store API 补充）
         self._bg_resolve_all_unowned_types()
 
@@ -377,7 +381,7 @@ class LibraryCollectionsMixin:
                 if name and aid_str not in self._game_name_cache:
                     self._game_name_cache[aid_str] = name
 
-                app_type = app.get('type', app.get('app_type', app.get('nAppType', 1)))
+                app_type = self._get_app_type(app)
                 type_stats[app_type] = type_stats.get(app_type, 0) + 1
 
                 cef_games.append({
@@ -396,7 +400,8 @@ class LibraryCollectionsMixin:
 
             print(f"[库管理] CEF游戏类型统计: {type_stats}")
             cef_games.sort(key=lambda g: steam_sort_key(g['name']))
-            self._lib_all_games = cef_games
+            # marshal 到主线程（bg 线程直接赋值有迭代器失效风险）
+            self.root.after(0, lambda g=cef_games: setattr(self, '_lib_all_games', g))
             # rebuild 由调用方（_bg_load_cef_data）统一调度，此处不再重复触发
         except Exception as e:
             print(f"[库管理] CEF 加载游戏列表失败: {e}")
@@ -469,6 +474,10 @@ class LibraryCollectionsMixin:
         menu.add_separator()
         menu.add_command(label="🌐 浏览社区分类", command=self.browse_shared_ui)
         menu.add_command(label="📤 分享我的分类", command=self.share_collections_ui)
+        if os.environ.get('STEAMSHELF_DEBUG_EXPR'):
+            menu.add_separator()
+            menu.add_command(label="🔍 检查表达式分类健康",
+                             command=self._health_check_expr_collections)
         # 在按钮上方弹出
         btn = self._create_coll_btn
         menu_h = menu.yposition("end") + 30  # 最后一项 y + 项高 + 边距
@@ -549,32 +558,19 @@ class LibraryCollectionsMixin:
                 or f.get('conf_filter', '确信度') != '确信度'
                 or f.get('qual_filter', '质量') != '质量')
 
-    def _eval_filter_expression(self, params, notes_data=None):
-        """求值筛选表达式，返回 app_id 字符串列表
-
-        notes_data: 可选 (notes_games, ai_map, sync_map) 元组，
-                    传入时复用避免重复 scan_all。
-        """
+    def _build_eval_candidates(self, params, notes_games, ai_map, sync_map):
+        """构建筛选表达式的候选 app_id 集合（分类交并 + 显示模式）"""
         coll_cache = getattr(self, '_coll_data_cache', {})
         states = params.get('coll_filter_states', {})
         plus_ids = [c for c, s in states.items() if s == 'plus']
         minus_ids = [c for c, s in states.items() if s == 'minus']
-        # 仅当引用了分类且缓存为空时才跳过（无分类引用时不需要缓存）
         if (plus_ids or minus_ids) and not coll_cache:
-            return []
+            return set()
         ops_p = params.get('coll_ops_plus', [True] * max(0, len(plus_ids) - 1))
         ops_m = params.get('coll_ops_minus', [True] * max(0, len(minus_ids) - 1))
 
         plus_o, plus_n = self._eval_coll_expr(plus_ids, ops_p)
         minus_o, minus_n = self._eval_coll_expr(minus_ids, ops_m)
-
-        # 笔记数据（提前加载，candidates 构建也需要）
-        if not self._expr_needs_notes(params):
-            notes_games, ai_map, sync_map = {}, {}, {}
-        elif notes_data:
-            notes_games, ai_map, sync_map = notes_data
-        else:
-            notes_games, ai_map, sync_map = self._lib_load_notes_data()
 
         if plus_ids:
             owned, not_owned = plus_o, plus_n
@@ -582,16 +578,41 @@ class LibraryCollectionsMixin:
             base = self._lib_all_games_backup or self._lib_all_games
             owned = set(str(g['app_id']) for g in base if g.get('owned'))
             not_owned = set()
+            # SSOT 对齐点：必须与 ui_library.py:1133-1155 的 merged_games 构建一致
+            # notes-only 和 uploading 游戏在 UI 中以 owned=True 加入，此处同步
+            for aid in notes_games:
+                owned.add(aid)
+            for aid, st in sync_map.items():
+                if st == 3:
+                    owned.add(aid)
         owned -= minus_o
         not_owned -= minus_n
 
         show = params.get('coll_filter_var', '已入库')
         if show == '已入库':
-            candidates = owned
-        elif show == '全部':
-            candidates = owned | not_owned
+            return owned
+        if show == '全部':
+            return owned | not_owned
+        return not_owned
+
+    def _eval_filter_expression(self, params, notes_data=None):
+        """求值筛选表达式，返回 app_id 字符串列表
+
+        notes_data: 可选 (notes_games, ai_map, sync_map) 元组，
+                    传入时复用避免重复 scan_all。
+        """
+        # 笔记数据
+        if not self._expr_needs_notes(params):
+            notes_games, ai_map, sync_map = {}, {}, {}
+        elif notes_data:
+            notes_games, ai_map, sync_map = notes_data
         else:
-            candidates = not_owned
+            notes_games, ai_map, sync_map = self._lib_load_notes_data()
+
+        candidates = self._build_eval_candidates(
+            params, notes_games, ai_map, sync_map)
+        if not candidates:
+            return []
 
         # 附加筛选（AI/类型/搜索）
         filters = params.get('filters', {})
@@ -603,7 +624,7 @@ class LibraryCollectionsMixin:
         need_type = type_f and len(type_f) < len(self._ALL_TYPES)
         if need_type:
             type_map = {str(g.get('app_id')): self._get_type_name(
-                g.get('type') or g.get('app_type') or g.get('nAppType') or 1)
+                self._get_app_type(g))
                 for g in (self._lib_all_games_backup or self._lib_all_games)}
 
         result = []
@@ -628,7 +649,7 @@ class LibraryCollectionsMixin:
         """根据缓存猜测 app 类型名"""
         for g in (self._lib_all_games_backup or self._lib_all_games):
             if str(g.get('app_id')) == aid:
-                t = g.get('type') or g.get('app_type') or g.get('nAppType') or 1
+                t = self._get_app_type(g)
                 return self._get_type_name(t)
         return "Game"
 
@@ -737,7 +758,7 @@ class LibraryCollectionsMixin:
                              f"plus={[c for c,s in params.get('coll_filter_states',{}).items() if s=='plus']}, "
                              f"minus={[c for c,s in params.get('coll_filter_states',{}).items() if s=='minus']}")
                     if self._apply_expression_update(
-                            data, col_id, new_ids):
+                            data, col_id, new_ids, notes_data=nd):
                         pass_changed = True
                         changed = True
                         _dbg_log(f"    → CHANGED")
@@ -753,17 +774,28 @@ class LibraryCollectionsMixin:
                      f"name={c.get('name','?')}")
         _dbg_log(f"=== auto_update END: changed={changed} ===")
 
+        # SSOT 回归防线：notes-only 游戏在结果中应归为 owned，不应归为 not_owned
+        if _dbg and nd[0]:
+            ng_keys = set(nd[0].keys())
+            for cid in expr_sources:
+                c = cache.get(cid, {})
+                bad = ng_keys & set(c.get('not_owned_app_ids', []))
+                if bad:
+                    _dbg_log(f"  ⚠️ SSOT ASSERT FAIL: {cid} has "
+                             f"{len(bad)} notes-only games as not_owned")
+
         if _dbg and _log_lines:
             _p = os.path.join(os.path.expanduser('~'), '.steam_toolkit', 'expr_debug.log')
             with open(_p, 'a', encoding='utf-8') as f:
                 f.write('\n'.join(_log_lines) + '\n\n')
 
         if changed:
-            self._collections_core.pop_pending_cef_ops()
-            self._collections_core.save_json(
+            self._save_and_sync(
                 data, backup_description="自动更新筛选表达式分类")
             # 直接更新树标签（不调用 _lib_load_collections，避免重建 cache 覆盖）
             self.root.after(0, self._refresh_expr_coll_labels)
+            # 延迟验证：CEF 同步是否成功，不一致则自动重推
+            self.root.after(3000, self._verify_expr_sync)
         return changed
 
     def _refresh_expr_coll_labels(self):
@@ -786,7 +818,235 @@ class LibraryCollectionsMixin:
             label = f"{icon} {name} ({total})"
             tree.item(col_id, text=label)
 
-    def _apply_expression_update(self, data, col_id, new_ids):
+    def _health_check_expr_collections(self):
+        """三方对账：eval结果 vs JSON存储 vs Steam实际数据"""
+        if not self._collections_core:
+            messagebox.showinfo("提示", "分类核心未初始化。", parent=self.root)
+            return
+        all_sources = self._collections_core._get_all_sources()
+        expr_sources = {k: v for k, v in all_sources.items()
+                        if v.get('source_type') == 'expression'}
+        if not expr_sources:
+            messagebox.showinfo("提示", "没有表达式分类。", parent=self.root)
+            return
+
+        # ── 1. Re-eval ──
+        nd = self._lib_load_notes_data()
+        eval_results = {}
+        for cid, src in expr_sources.items():
+            params = src.get('source_params', {})
+            eval_results[cid] = set(self._eval_filter_expression(params, notes_data=nd))
+
+        # ── 2. JSON 存储 ──
+        json_data = self._collections_core.load_json() or []
+        json_results = {}
+        for entry in json_data:
+            key = entry[0]
+            if not key.startswith("user-collections."):
+                continue
+            cid = key[len("user-collections."):]
+            if cid not in expr_sources:
+                continue
+            meta = entry[1]
+            if meta.get("is_deleted") or "value" not in meta:
+                continue
+            val = json.loads(meta['value'])
+            json_results[cid] = set(str(a) for a in val.get('added', []))
+
+        # ── 3. CEF/Steam 实际数据 ──
+        cef_results = {}
+        cef_error = ""
+        bridge = getattr(self, '_cef_bridge', None)
+        if bridge:
+            try:
+                cef_data = bridge.get_all_collections_with_apps()
+                colls = cef_data.get('collections', {})
+                for cid in expr_sources:
+                    if cid in colls:
+                        cef_results[cid] = set(
+                            str(a) for a in colls[cid].get('appIds', []))
+            except Exception as e:
+                cef_error = str(e)
+
+        # ── 4. 对账 ──
+        self._show_health_report(
+            expr_sources, eval_results, json_results, cef_results, cef_error)
+
+    def _show_health_report(self, expr_sources, eval_r, json_r, cef_r, cef_err):
+        """显示健康检查报告"""
+        cache = getattr(self, '_coll_data_cache', {})
+        lines = []
+        all_ok = True
+
+        for cid in expr_sources:
+            c = cache.get(cid, {})
+            name = c.get('name', cid)
+            ev = eval_r.get(cid, set())
+            js = json_r.get(cid, set())
+            ce = cef_r.get(cid)
+
+            ev_n, js_n = len(ev), len(js)
+            match_ej = (ev == js)
+            match_ec = (ev == ce) if ce is not None else None
+
+            if match_ej and match_ec is not False:
+                status = "✅"
+            else:
+                status = "❌"
+                all_ok = False
+
+            lines.append(f"{status} {name}")
+            lines.append(f"   eval={ev_n}  json={js_n}"
+                         + (f"  steam={len(ce)}" if ce is not None else "  steam=N/A"))
+
+            if not match_ej:
+                only_eval = ev - js
+                only_json = js - ev
+                if only_eval:
+                    lines.append(f"   ⚠️ eval有/json无: {len(only_eval)}个")
+                if only_json:
+                    lines.append(f"   ⚠️ json有/eval无: {len(only_json)}个")
+            if match_ec is False:
+                only_eval = ev - ce
+                only_cef = ce - ev
+                if only_eval:
+                    lines.append(f"   ⚠️ eval有/steam无: {len(only_eval)}个")
+                if only_cef:
+                    lines.append(f"   ⚠️ steam有/eval无: {len(only_cef)}个")
+
+        # 显示
+        win = tk.Toplevel(self.root)
+        win.title("🔍 表达式分类健康检查")
+        win.resizable(True, True)
+        win.transient(self.root)
+
+        header = "✅ 全部正常" if all_ok else "❌ 发现不一致"
+        tk.Label(win, text=header,
+                 font=("", 14, "bold"),
+                 fg="#2a7f2a" if all_ok else "#c0392b").pack(pady=(15, 5))
+
+        if cef_err:
+            tk.Label(win, text=f"⚠️ CEF查询失败: {cef_err[:60]}",
+                     font=("", 9), fg="#888").pack()
+
+        txt = tk.Text(win, width=60, height=min(len(lines) + 2, 25),
+                      font=("Monaco", 10), wrap=tk.WORD)
+        txt.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+        txt.insert(tk.END, "\n".join(lines))
+        txt.config(state=tk.DISABLED)
+
+        btn_frame = tk.Frame(win)
+        btn_frame.pack(pady=(0, 15))
+
+        def _copy():
+            self.root.clipboard_clear()
+            self.root.clipboard_append("\n".join(lines))
+            messagebox.showinfo("已复制", "报告已复制到剪贴板。", parent=win)
+
+        def _resync():
+            n = self._force_resync_expr_to_cef()
+            messagebox.showinfo("完成", f"已强制同步 {n} 个表达式分类到 Steam。",
+                                parent=win)
+            win.destroy()
+            self.root.after(200, self._health_check_expr_collections)
+
+        if not all_ok:
+            ttk.Button(btn_frame, text="🔄 强制重新同步到Steam",
+                       command=_resync).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="📋 复制报告",
+                   command=_copy).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="关闭",
+                   command=win.destroy).pack(side=tk.LEFT, padx=4)
+        self._center_window(win)
+
+    def _force_resync_expr_to_cef(self):
+        """强制将所有表达式分类的当前 JSON 数据推送到 CEF"""
+        if not self._collections_core:
+            return 0
+        all_sources = self._collections_core._get_all_sources()
+        data = self._collections_core.load_json() or []
+        count = 0
+        for entry in data:
+            key = entry[0]
+            if not key.startswith("user-collections."):
+                continue
+            cid = key[len("user-collections."):]
+            if cid not in all_sources:
+                continue
+            if all_sources[cid].get('source_type') != 'expression':
+                continue
+            meta = entry[1]
+            if meta.get("is_deleted") or "value" not in meta:
+                continue
+            val = json.loads(meta['value'])
+            int_ids = [int(a) for a in val.get('added', []) if str(a).isdigit()]
+            self._collections_core.queue_cef_upsert(
+                cid, val.get('name', ''), int_ids)
+            count += 1
+        if count:
+            self._save_and_sync(data, backup_description="强制重新同步表达式分类")
+        return count
+
+    def _verify_expr_sync(self):
+        """自动验证：CEF 同步后对账，不一致则自动重推（静默，仅写日志）"""
+        bridge = getattr(self, '_cef_bridge', None)
+        if not bridge or not self._collections_core:
+            return
+        all_sources = self._collections_core._get_all_sources()
+        expr_cids = [k for k, v in all_sources.items()
+                     if v.get('source_type') == 'expression']
+        if not expr_cids:
+            return
+
+        # 读 JSON
+        data = self._collections_core.load_json() or []
+        json_sets = {}
+        for entry in data:
+            key = entry[0]
+            if not key.startswith("user-collections."):
+                continue
+            cid = key[len("user-collections."):]
+            if cid not in expr_cids:
+                continue
+            meta = entry[1]
+            if meta.get("is_deleted") or "value" not in meta:
+                continue
+            val = json.loads(meta['value'])
+            json_sets[cid] = set(str(a) for a in val.get('added', []))
+
+        # 读 CEF
+        try:
+            cef_data = bridge.get_all_collections_with_apps()
+            cef_colls = cef_data.get('collections', {})
+        except Exception:
+            return  # CEF 不可用，跳过
+
+        # 对账
+        mismatched = []
+        for cid in expr_cids:
+            js = json_sets.get(cid)
+            ce = cef_colls.get(cid)
+            if js is None or ce is None:
+                continue
+            ce_set = set(str(a) for a in ce.get('appIds', []))
+            if js != ce_set:
+                mismatched.append(cid)
+
+        if not mismatched:
+            return
+
+        # 自动重推不一致的分类
+        _dbg = os.environ.get('STEAMSHELF_DEBUG_EXPR')
+        if _dbg:
+            _p = os.path.join(os.path.expanduser('~'),
+                              '.steam_toolkit', 'expr_debug.log')
+            with open(_p, 'a', encoding='utf-8') as f:
+                f.write(f"[VERIFY] {len(mismatched)} mismatched, "
+                        f"auto-resync: {mismatched}\n")
+        self._force_resync_expr_to_cef()
+
+    def _apply_expression_update(self, data, col_id, new_ids,
+                                   notes_data=None):
         """更新单个表达式分类的 JSON 数据 + 缓存，返回是否有变化"""
         for entry in data:
             if entry[0] != f"user-collections.{col_id}":
@@ -812,6 +1072,11 @@ class LibraryCollectionsMixin:
                     str(g['app_id']) for g in
                     (self._lib_all_games_backup or self._lib_all_games)
                     if g.get('owned'))
+                # SSOT 对齐：notes-only/uploading 游戏在 UI 中 owned=True
+                if notes_data:
+                    ng, _, sm = notes_data
+                    owned_set.update(ng)
+                    owned_set.update(a for a, s in sm.items() if s == 3)
                 cache[col_id]['owned_app_ids'] = [
                     a for a in new_ids if a in owned_set]
                 cache[col_id]['not_owned_app_ids'] = [
@@ -2183,7 +2448,7 @@ class LibraryCollectionsMixin:
         """从游戏列表中提取 DLC 类型的 appid 集合"""
         dlc_ids = set()
         for g in games:
-            at = g.get('type') or g.get('app_type') or g.get('nAppType') or 1
+            at = self._get_app_type(g)
             if at & 0x020 and not (at & 1):
                 dlc_ids.add(g.get('app_id') or g.get('appid'))
         return dlc_ids
@@ -2225,7 +2490,7 @@ class LibraryCollectionsMixin:
                 parent=self.root):
             return
 
-        self._collections_core.save_json(
+        self._save_and_sync(
             data, backup_description=f"清理DLC: 移除{total_removed}条")
         self._ui_refresh()
         messagebox.showinfo("清理完成",

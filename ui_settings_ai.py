@@ -369,6 +369,7 @@ def build_ai_settings_ui(app):
         elif "ai_advanced_params" in app._config:
             del app._config["ai_advanced_params"]
         app._save_config(app._config)
+        win.grab_release()
         win.destroy()
 
     btn_frame = tk.Frame(win, padx=20)

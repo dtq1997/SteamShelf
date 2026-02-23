@@ -95,6 +95,7 @@ class NotesViewerMixin:
                                     f"已为 AppID {aid} 创建笔记:\n「{title}」",
                                     parent=win)
                 self._refresh_games_list()
+                win.grab_release()
                 win.destroy()
             except Exception as e:
                 messagebox.showerror("❌ 错误", f"写入失败:\n{e}", parent=win)

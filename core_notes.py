@@ -203,8 +203,8 @@ class SteamNotesManager:
                 try:
                     import shutil
                     shutil.copy2(path, path + ".corrupt")
-                except Exception:
-                    pass
+                except Exception as bk_err:
+                    print(f"[笔记] ❌ notes_{app_id} 备份失败: {bk_err}")
                 print(f"[笔记] ⚠️ notes_{app_id} 解析失败已备份: {e}")
         return {"notes": []}
 
@@ -232,12 +232,19 @@ class SteamNotesManager:
         notes = data.get("notes", [])
         # 提取 AI 信息（与 scan_ai_notes 相同逻辑）
         ai_info = self._extract_ai_info(notes)
+        # 预计算最新笔记时间戳（避免 tree rebuild 时逐游戏遍历）
+        latest_ts = 0
+        for note in notes:
+            ts = note.get("time_modified", note.get("time_created", 0))
+            if ts > latest_ts:
+                latest_ts = ts
         entry = {
             'mtime': mtime,
             'note_count': len(notes),
             'file_path': filepath,
             'notes': notes,
             'ai_info': ai_info,
+            'latest_ts': latest_ts,
         }
         self._scan_cache[app_id] = entry
         return entry
@@ -304,6 +311,7 @@ class SteamNotesManager:
                 'app_id': app_id,
                 'note_count': entry['note_count'],
                 'file_path': entry['file_path'],
+                'latest_ts': entry['latest_ts'],
             }
             if entry['ai_info']:
                 ai_notes_map[app_id] = entry['ai_info']

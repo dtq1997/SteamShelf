@@ -314,5 +314,8 @@ from ui_main import main
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()  # PyInstaller macOS 子进程必需
+    # .dev 标记文件存在时自动开启调试模式（开发环境专用）
+    if os.path.exists(os.path.join(os.path.dirname(__file__), '.dev')):
+        os.environ.setdefault('STEAMSHELF_DEBUG_EXPR', '1')
     _setup_logging()
     main()

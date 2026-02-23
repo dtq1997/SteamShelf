@@ -176,6 +176,7 @@ class ImportExportMixin:
                     messagebox.showinfo("✅ 成功",
                         f"已导出 {n_files} 个文件到:\n{output_dir}",
                         parent=win)
+                    win.grab_release()
                     win.destroy()
                 except Exception as e:
                     messagebox.showerror("❌ 错误", f"导出失败:\n{e}", parent=win)
@@ -194,17 +195,22 @@ class ImportExportMixin:
                     messagebox.showinfo("✅ 成功",
                         f"已导出 {len(aids)} 个游戏的 {total_notes} 条笔记到:\n{path}",
                         parent=win)
+                    win.grab_release()
                     win.destroy()
                 except Exception as e:
                     messagebox.showerror("❌ 错误", f"导出失败:\n{e}", parent=win)
 
         btn_frame = tk.Frame(win)
         btn_frame.pack(pady=(10, 15))
+        def _close_export():
+            win.grab_release()
+            win.destroy()
+
         ttk.Button(btn_frame, text="📤 确认导出",
                    command=do_export).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="取消",
-                   command=win.destroy).pack(side=tk.LEFT, padx=5)
-
+                   command=_close_export).pack(side=tk.LEFT, padx=5)
+        win.protocol("WM_DELETE_WINDOW", _close_export)
         self._center_window(win)
 
     def _ui_dedup_notes(self):
@@ -222,7 +228,11 @@ class ImportExportMixin:
         if not duplicates:
             tk.Label(win, text="✅ 没有发现重复的笔记！",
                      font=("", 11), fg="#2a7f2a").pack(padx=40, pady=20)
-            ttk.Button(win, text="关闭", command=win.destroy).pack(pady=(0, 15))
+            def _close_dedup():
+                win.grab_release()
+                win.destroy()
+            ttk.Button(win, text="关闭", command=_close_dedup).pack(pady=(0, 15))
+            win.protocol("WM_DELETE_WINDOW", _close_dedup)
             self._center_window(win)
             return
 
@@ -318,6 +328,7 @@ class ImportExportMixin:
             messagebox.showinfo("✅ 完成",
                 f"已删除 {removed_total} 条重复笔记。", parent=win)
             self._refresh_games_list()
+            win.grab_release()
             win.destroy()
 
         def _delete_all():
@@ -336,6 +347,11 @@ class ImportExportMixin:
             messagebox.showinfo("✅ 完成",
                 f"已删除 {removed_total} 条重复笔记。", parent=win)
             self._refresh_games_list()
+            win.grab_release()
+            win.destroy()
+
+        def _close_dedup():
+            win.grab_release()
             win.destroy()
 
         ttk.Button(btn_frame, text="🗑️ 删除选中组的副本",
@@ -343,8 +359,8 @@ class ImportExportMixin:
         ttk.Button(btn_frame, text="🗑️ 全部去重",
                    command=_delete_all).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="取消",
-                   command=win.destroy).pack(side=tk.LEFT, padx=(15, 4))
-
+                   command=_close_dedup).pack(side=tk.LEFT, padx=(15, 4))
+        win.protocol("WM_DELETE_WINDOW", _close_dedup)
         self._center_window(win)
 
     def _ui_import(self):
@@ -463,7 +479,36 @@ class ImportExportMixin:
                             f"剩余 {remaining} 条将继续导入。",
                             parent=win)
 
-                    # 第二步：AI 笔记冲突检测
+                    # 第二步：询问是否过滤未入库游戏的笔记
+                    owned = self._get_owned_app_ids_set()
+                    if owned is not None and filtered:
+                        unowned_aids = {a for a in filtered if int(a) not in owned}
+                        if unowned_aids:
+                            n_unowned = len(unowned_aids)
+                            n_notes = sum(len(filtered[a]) for a in unowned_aids)
+                            r = messagebox.askyesnocancel(
+                                "📥 筛选已入库游戏",
+                                f"待导入笔记涉及 {len(filtered)} 个游戏，"
+                                f"其中 {n_unowned} 个不在你的库中"
+                                f"（共 {n_notes} 条笔记）。\n\n"
+                                "是否只导入已入库游戏的笔记？\n\n"
+                                "是 → 只导入已入库游戏的笔记\n"
+                                "否 → 全部导入（未入库游戏的笔记会保留，"
+                                "日后入库时自动显示）\n"
+                                "取消 → 取消导入",
+                                parent=win)
+                            if r is None:
+                                return
+                            if r:
+                                for a in unowned_aids:
+                                    del filtered[a]
+                                if not filtered:
+                                    messagebox.showinfo("提示",
+                                        "过滤后没有需要导入的笔记。",
+                                        parent=win)
+                                    return
+
+                    # 第三步：AI 笔记冲突检测
                     conflicts = {}
                     for aid, entries in filtered.items():
                         incoming_ai = [e for e in entries
@@ -514,14 +559,20 @@ class ImportExportMixin:
                         f"已导入为 AppID {aid} 的笔记:\n「{title}」",
                         parent=win)
                     self._refresh_games_list()
+                    win.grab_release()
                     win.destroy()
             except Exception as e:
                 messagebox.showerror("❌ 错误", f"导入失败:\n{e}", parent=win)
 
+        def _close_import():
+            win.grab_release()
+            win.destroy()
+
         _imp_btn_frame = tk.Frame(win)
         _imp_btn_frame.pack(pady=(5, 15))
         ttk.Button(_imp_btn_frame, text="✅ 确认导入", command=do_import).pack(side=tk.LEFT, padx=5)
-        ttk.Button(_imp_btn_frame, text="取消", command=win.destroy).pack(side=tk.LEFT, padx=5)
+        ttk.Button(_imp_btn_frame, text="取消", command=_close_import).pack(side=tk.LEFT, padx=5)
+        win.protocol("WM_DELETE_WINDOW", _close_import)
         self._center_window(win)
 
     def _filter_uploading_for_import(self, parsed: dict) -> tuple:
@@ -646,8 +697,15 @@ class ImportExportMixin:
         btn_frame.pack(pady=(15, 15))
 
         def _do_apply(policy):
-            safe, skipped = self._filter_uploading_for_import(parsed)
-            results = self.manager.apply_batch_import(safe, ai_policy=policy)
+            try:
+                safe, skipped = self._filter_uploading_for_import(parsed)
+                results = self.manager.apply_batch_import(safe, ai_policy=policy)
+            except Exception as e:
+                cwin.grab_release()
+                cwin.destroy()
+                messagebox.showerror("❌ 错误", f"导入失败:\n{e}",
+                                     parent=import_win)
+                return
             cwin.grab_release()
             cwin.destroy()
             self._show_import_result(import_win, results)

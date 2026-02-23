@@ -132,8 +132,12 @@ class SharingMixin:
                   command=lambda: self._do_share(
                       win, title_var.get().strip(), desc_var.get().strip(),
                       check_vars)).pack(side="right", padx=4)
+        def _close_share():
+            win.grab_release()
+            win.destroy()
         tk.Button(btn_frame, text="取消",
-                  command=win.destroy).pack(side="right", padx=4)
+                  command=_close_share).pack(side="right", padx=4)
+        win.protocol("WM_DELETE_WINDOW", _close_share)
 
         self._center_window(win)
 
@@ -192,6 +196,7 @@ class SharingMixin:
             self._share_status.set("")
             messagebox.showinfo("完成", "分享成功！其他用户现在可以浏览你的分类。",
                                 parent=win)
+            win.grab_release()
             win.destroy()
         else:
             self._share_status.set("")

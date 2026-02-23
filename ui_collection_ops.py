@@ -959,8 +959,8 @@ class CollectionOpsMixin:
                 data, name, app_ids)
             created_ids.append(col_id)
 
-        # 保存本地文件
-        self._collections_core.save_json(
+        # 保存本地文件 + CEF 同步
+        self._save_and_sync(
             data, backup_description="账号分类批量导入")
 
         total_created = len(created_ids)

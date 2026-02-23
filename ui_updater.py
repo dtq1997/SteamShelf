@@ -91,8 +91,11 @@ class UpdaterMixin:
                 info, win, prog_frame, prog_label, prog_bar, update_btn))
         update_btn.pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="稍后再说",
-                   command=win.destroy).pack(side=tk.LEFT, padx=5)
+                   command=lambda: (win.grab_release(), win.destroy())
+                   ).pack(side=tk.LEFT, padx=5)
 
+        win.protocol("WM_DELETE_WINDOW",
+                     lambda: (win.grab_release(), win.destroy()))
         self._center_window(win)
 
     def _do_download_and_apply(self, info, win, prog_frame,
@@ -134,6 +137,7 @@ class UpdaterMixin:
                     f"更新包已下载到:\n{result}\n\n"
                     "请手动解压覆盖当前目录后重启。",
                     parent=win)
+                win.grab_release()
                 win.destroy()
 
         threading.Thread(target=bg_thread(_bg), daemon=True).start()

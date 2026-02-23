@@ -471,7 +471,9 @@ class SteamToolboxMain(
                     self._upload_and_close()
                     return
 
-            # 确定关闭 → 停止后台线程 + 持久化缓存
+            # 确定关闭 → 停止定时器 + 后台线程 + 持久化缓存
+            if self._steam_monitor_id:
+                root.after_cancel(self._steam_monitor_id)
             self._resolve_thread_running = False
             if getattr(self, '_app_detail_cache', None):
                 self._persist_all_caches()
@@ -496,14 +498,12 @@ class SteamToolboxMain(
         """确保游戏名称缓存已加载 — 持久化 + 全量列表 + 本地扫描 + 后台补全"""
         if self._game_name_cache_loaded and not force:
             return
-        # 1. 从配置文件加载已持久化的名称缓存
+        # 在局部 dict 中构建完整缓存，最后一次性替换（避免 clear+update 竞态）
         persisted = self._config.get("game_name_cache", {})
-        self._game_name_cache.clear()
-        self._game_name_cache.update(persisted)
+        new_cache = dict(persisted)
         # 2. 尝试从 ISteamApps/GetAppList/v2/ 获取全量名称列表（无需 API Key）
         bulk_cache_ts = self._config.get("game_name_bulk_cache_ts", 0)
         now = time.time()
-        # 每 24 小时更新一次全量列表
         if now - bulk_cache_ts > 86400 or not persisted:
             try:
                 est_total = len(persisted) if persisted else 0
@@ -512,7 +512,7 @@ class SteamToolboxMain(
                     progress_callback=progress_callback,
                     estimated_total=est_total)
                 if bulk_names:
-                    self._game_name_cache.update(bulk_names)
+                    new_cache.update(bulk_names)
                     self._config["game_name_bulk_cache_ts"] = now
                     print(f"[游戏名称] 全量列表已更新: {len(bulk_names)} 条")
             except Exception as e:
@@ -522,10 +522,11 @@ class SteamToolboxMain(
             library_games = SteamAccountScanner.scan_library(
                 self.current_account['steam_path'])
             for g in library_games:
-                self._game_name_cache[g['app_id']] = g['name']
+                new_cache[g['app_id']] = g['name']
         except Exception:
             pass
-        # 4. 持久化合并后的缓存
+        # 4. 一次性发布到共享 cache（原子替换，主线程不会看到空 cache）
+        self._game_name_cache.update(new_cache)
         self._persist_name_cache()
         self._game_name_cache_loaded = True
 
@@ -784,32 +785,34 @@ class SteamToolboxMain(
                 time.sleep(min(1.0 * (2 ** attempt), 5.0))
             return None
 
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            for start in range(0, total, CHUNK):
-                if not self._resolve_thread_running:
-                    break
-                chunk = need[start:start + CHUNK]
-                futs = [pool.submit(fetch_one, aid) for aid in chunk]
-                for f in as_completed(futs):
-                    done += 1
-                    self._resolve_progress = (done, total)
-                    try:
-                        result = f.result()
-                    except Exception:
-                        continue
-                    if result is None:
-                        continue
-                    aid, name, type_str, detail = result
-                    if name and not name.startswith("AppID "):
-                        self._game_name_cache[aid] = name
-                    self._app_type_cache[aid] = type_str or ""
-                    self._app_detail_cache[aid] = detail or {"_removed": True}
-                    persist += 1
-                    if persist % 200 == 0:
-                        self._persist_all_caches()
-        self._persist_all_caches()
-        print(f"[库管理] 后台详情获取完成: {done}/{total}")
-        self._resolve_thread_running = False
+        try:
+            with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+                for start in range(0, total, CHUNK):
+                    if not self._resolve_thread_running:
+                        break
+                    chunk = need[start:start + CHUNK]
+                    futs = [pool.submit(fetch_one, aid) for aid in chunk]
+                    for f in as_completed(futs):
+                        done += 1
+                        self._resolve_progress = (done, total)
+                        try:
+                            result = f.result()
+                        except Exception:
+                            continue
+                        if result is None:
+                            continue
+                        aid, name, type_str, detail = result
+                        if name and not name.startswith("AppID "):
+                            self._game_name_cache[aid] = name
+                        self._app_type_cache[aid] = type_str or ""
+                        self._app_detail_cache[aid] = detail or {"_removed": True}
+                        persist += 1
+                        if persist % 200 == 0:
+                            self._persist_all_caches()
+            self._persist_all_caches()
+            print(f"[库管理] 后台详情获取完成: {done}/{total}")
+        finally:
+            self._resolve_thread_running = False
         try:
             self.root.after(0, self._lib_schedule_tree_rebuild)
         except Exception:
@@ -869,6 +872,7 @@ class SteamToolboxMain(
             self._ensure_game_name_cache(force=True)
         elif not self._game_name_cache_loaded:
             self._ensure_game_name_cache_fast()
+        self._invalidate_notes_cache()
         self._tree_rebuild_cache = None
         if getattr(self, '_viewing_collections', False):
             self._apply_coll_filters()

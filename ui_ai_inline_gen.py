@@ -281,11 +281,17 @@ class InlineAIGenMixin:
                 self._config.pop("ai_system_prompt", None)
             self._save_config(self._config)
             messagebox.showinfo("✅", "系统提示词已保存。", parent=pw)
+            pw.grab_release()
+            pw.destroy()
+
+        def _close():
+            pw.grab_release()
             pw.destroy()
 
         ttk.Button(pb, text="🔄 恢复默认", command=_reset).pack(side=tk.LEFT)
         ttk.Button(pb, text="💾 保存", command=_save).pack(side=tk.RIGHT)
-        ttk.Button(pb, text="取消", command=pw.destroy).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(pb, text="取消", command=_close).pack(side=tk.RIGHT, padx=5)
+        pw.protocol("WM_DELETE_WINDOW", _close)
         self._center_window(pw)
 
     # ────────────────────── 生成入口 ──────────────────────

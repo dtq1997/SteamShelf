@@ -78,8 +78,8 @@ def check_update(timeout=10):
         try:
             req = urllib.request.Request(source_url, headers={
                 "User-Agent": f"SteamShelf/{__version__}"})
-            resp = urlopen(req, timeout=timeout)
-            data = json.loads(resp.read().decode("utf-8"))
+            with urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
             remote = parse_version(data["version"])
             if remote > current:
                 urls = _resolve_platform_urls(data.get("download_urls", []))
@@ -112,18 +112,18 @@ def download_update(urls, dest_path, progress_cb=None) -> bool:
         try:
             req = urllib.request.Request(url, headers={
                 "User-Agent": f"SteamShelf/{__version__}"})
-            resp = urlopen(req, timeout=60)
-            total = int(resp.headers.get("Content-Length", 0))
-            downloaded = 0
-            with open(dest_path, "wb") as f:
-                while True:
-                    chunk = resp.read(65536)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_cb:
-                        progress_cb(downloaded, total)
+            with urlopen(req, timeout=60) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                with open(dest_path, "wb") as f:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_cb:
+                            progress_cb(downloaded, total)
             return True
         except Exception as e:
             print(f"[更新] 下载失败 {url}: {e}")

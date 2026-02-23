@@ -36,3 +36,4 @@ COLLAB_PREFS.md
 config.json
 *.local.json
 .env*
+.dev
