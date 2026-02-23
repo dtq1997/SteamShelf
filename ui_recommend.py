@@ -508,23 +508,14 @@ class RecommendMixin:
                     name_entries[key] = name_var
 
                 def confirm_create():
-                    owned_set = self._get_owned_app_ids_set()
-                    filter_owned = False
-                    if owned_set is not None:
-                        all_ids = set()
-                        for d in fetched_data.values():
-                            all_ids.update(d['ids'])
-                        removed = len(all_ids) - len(all_ids & owned_set)
-                        if removed > 0:
-                            r = messagebox.askyesnocancel(
-                                "筛选已入库游戏",
-                                f"共 {len(all_ids)} 个不重复游戏，"
-                                f"{removed} 个未入库。\n\n"
-                                "是否只保留已入库的游戏？",
-                                parent=name_win)
-                            if r is None:
-                                return
-                            filter_owned = r
+                    all_ids = set()
+                    for d in fetched_data.values():
+                        all_ids.update(d['ids'])
+                    result = self._ask_batch_owned_filter(
+                        all_ids, parent=name_win)
+                    if result[1] is None:
+                        return
+                    owned_set, filter_owned = result
 
                     created = 0
                     for key, d in fetched_data.items():

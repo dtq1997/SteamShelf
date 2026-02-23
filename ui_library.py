@@ -132,65 +132,52 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         right = tk.Frame(body)
         right.grid(row=0, column=2, sticky="nsew")
 
-        # 标题行 + 勾选筛选（同一行）
+        # 标题行（精简：标题 + 搜索框）
         title_frame = tk.Frame(right)
         title_frame.pack(fill=tk.X)
         tk.Label(title_frame, text="📚 Steam 库",
                  font=("微软雅黑", 11, "bold")).pack(side=tk.LEFT)
 
+        # 筛选变量（不显示在标题行，通过右键菜单访问）
         self._dirty_filter_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(title_frame, text="⬆ 有改动",
-                        variable=self._dirty_filter_var,
-                        style="Filter.TCheckbutton",
-                        command=lambda: self._lib_schedule_tree_rebuild()
-                        ).pack(side=tk.LEFT, padx=(8, 0))
-
         self._uploading_filter_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(title_frame, text="☁️⬆ 未上传",
-                        variable=self._uploading_filter_var,
-                        style="Filter.TCheckbutton",
-                        command=lambda: self._lib_schedule_tree_rebuild()
-                        ).pack(side=tk.LEFT, padx=(4, 0))
+        self._upload_all_btn = None  # 兼容引用
 
-        # 工具按钮（右侧对齐：全选最右，全部上传在其左，仅有改动时显示）
-        ttk.Button(title_frame, text="✅ 全选", width=6,
-                   command=self._select_all_games).pack(side=tk.RIGHT, padx=(2, 0))
-        self._upload_all_btn = ttk.Button(title_frame,
-            text="☁️ 全部上传", width=12,
-            command=self._cloud_upload_all)
-
-        # ── 搜索栏（含搜索模式切换） ──
-        lib_search_frame = tk.Frame(right)
-        lib_search_frame.pack(fill=tk.X, pady=(4, 2))
+        # 搜索框（直接嵌入标题行右侧）
         self._lib_search_var = tk.StringVar()
-        self._main_search_var = self._lib_search_var  # 别名，兼容笔记方法
+        self._main_search_var = self._lib_search_var
         self._main_search_mode = tk.StringVar(value="name")
-        ttk.Radiobutton(lib_search_frame, text="按名称",
-                        variable=self._main_search_mode,
-                        value="name", style="Filter.TRadiobutton",
-                        command=lambda: self._on_main_search_changed()
-                        ).pack(side=tk.LEFT)
-        ttk.Radiobutton(lib_search_frame, text="按内容",
-                        variable=self._main_search_mode,
-                        value="content", style="Filter.TRadiobutton",
-                        command=lambda: self._on_main_search_changed()
-                        ).pack(side=tk.LEFT)
+        self._search_mode_label = tk.Label(
+            title_frame, text="🔍", font=("", 9), cursor="hand2")
+        self._search_mode_label.pack(side=tk.RIGHT)
+        self._search_mode_label.bind("<Button-1>",
+            lambda e: self._set_search_mode(
+                "content" if self._main_search_mode.get() == "name" else "name"))
         self._lib_search_entry = ttk.Entry(
-            lib_search_frame, textvariable=self._lib_search_var, width=30)
+            title_frame, textvariable=self._lib_search_var, width=20)
         self._lib_search_entry.pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
-        self._lib_search_var.trace_add("write", lambda *_: self._on_main_search_changed())
-        # Escape 清空搜索并回到列表
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(4, 0))
+        self._lib_search_var.trace_add(
+            "write", lambda *_: self._on_main_search_changed())
         self._lib_search_entry.bind("<Escape>", lambda e: (
             self._lib_search_var.set(""), self._games_tree.focus_set()))
-        # Ctrl/Cmd+F 聚焦搜索框
+        # 右键切换搜索模式（名称/内容）
+        self._lib_search_entry.bind(
+            "<Button-2>" if platform.system() == "Darwin" else "<Button-3>",
+            self._show_search_mode_menu)
+        self._update_search_placeholder()
         import platform as _plat
         _mod = "Command" if _plat.system() == "Darwin" else "Control"
-        self.root.bind(f"<{_mod}-f>", lambda e: self._lib_search_entry.focus_set())
+        self.root.bind(
+            f"<{_mod}-f>", lambda e: self._lib_search_entry.focus_set())
+        self.root.bind(
+            f"<{_mod}-a>", lambda e: (self._select_all_games(), "break")[-1])
+        self.root.bind(
+            f"<{_mod}-e>", lambda e: self._ui_export_dialog())
 
-        # ── 下拉筛选（渐进显示） ──
+        # ── 下拉筛选（默认隐藏，通过右键菜单 "筛选" 显示） ──
         filter_frame = tk.Frame(right)
-        filter_frame.pack(fill=tk.X, pady=(2, 0))
+        self._filter_frame = filter_frame  # 保留引用，供右键菜单切换
 
         # ── 收藏夹筛选状态行（有 +/- 时显示，初始隐藏） ──
         self._coll_filter_status = tk.Text(
@@ -890,6 +877,33 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         except Exception:
             return False
 
+    # ── 搜索模式切换 ──
+
+    def _show_search_mode_menu(self, event):
+        """搜索框右键菜单：切换搜索模式"""
+        menu = tk.Menu(self.root, tearoff=0)
+        cur = self._main_search_mode.get()
+        menu.add_command(
+            label=("✓ " if cur == "name" else "   ") + "按名称搜索",
+            command=lambda: self._set_search_mode("name"))
+        menu.add_command(
+            label=("✓ " if cur == "content" else "   ") + "按笔记内容搜索",
+            command=lambda: self._set_search_mode("content"))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _set_search_mode(self, mode):
+        self._main_search_mode.set(mode)
+        self._update_search_placeholder()
+        self._on_main_search_changed()
+
+    def _update_search_placeholder(self):
+        """更新搜索模式指示标签"""
+        lbl = getattr(self, '_search_mode_label', None)
+        if not lbl:
+            return
+        mode = self._main_search_mode.get()
+        lbl.config(text="📝" if mode == "content" else "🔍")
+
     # ── 评测等级标签（review_score 1-9） ──
     _REVIEW_LABELS = {
         9: "好评如潮", 8: "特别好评", 7: "好评", 6: "多半好评",
@@ -1044,7 +1058,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_status.config(text=text)
         if self.manager:
             dirty_n = self.manager.dirty_count()
-            if hasattr(self, '_upload_all_btn'):
+            if self._upload_all_btn:
                 if dirty_n > 0:
                     self._upload_all_btn.config(text=f"☁️ 全部上传({dirty_n})")
                     self._upload_all_btn.pack(side=tk.RIGHT, padx=(2, 0))

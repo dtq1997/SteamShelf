@@ -95,9 +95,8 @@ class InlineAIGenMixin:
                  font=("微软雅黑", 9), fg="#555", anchor=tk.W
                  ).pack(fill=tk.X)
 
-        # ── 操作行（始终可见） ──
+        # ── 操作行（默认隐藏，AI 生成启动后自动显示） ──
         self._inline_action_frame = tk.Frame(container)
-        self._inline_action_frame.pack(fill=tk.X)
 
         self._web_search_mode = "local"  # "local" / "ai_web"
         self._inline_gen_btn = ttk.Button(
@@ -189,6 +188,9 @@ class InlineAIGenMixin:
         """显示完整进度区（action 上方）+ 控制按钮"""
         self._inline_collapsed = False
         self._inline_compact_frame.pack_forget()
+        # 确保 action frame 已 pack（按钮默认隐藏，生成时才显示）
+        if not self._inline_action_frame.winfo_ismapped():
+            self._inline_action_frame.pack(fill=tk.X)
         if not self._inline_ai_progress_frame.winfo_ismapped():
             self._inline_ai_progress_frame.pack(
                 fill=tk.X, before=self._inline_action_frame, pady=(0, 4))
@@ -198,10 +200,11 @@ class InlineAIGenMixin:
     def _inline_toggle_collapse(self):
         """收起/展开进度区"""
         if not self._inline_ai_running:
-            # 生成结束后，收起 = 隐藏一切
+            # 生成结束后，收起 = 隐藏一切（含 action frame）
             self._inline_ai_progress_frame.pack_forget()
             self._inline_compact_frame.pack_forget()
             self._inline_hide_ctrl_buttons()
+            self._inline_action_frame.pack_forget()
             return
         if self._inline_collapsed:
             # 展开：隐藏精简行，显示完整进度

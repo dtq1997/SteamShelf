@@ -364,40 +364,20 @@ class SteamToolboxMain(
                                  bg="#4a90d9", cursor="hand2")
             _logo_lbl.pack(side=tk.LEFT, padx=(8, 2))
             _logo_lbl.bind("<Button-1>", lambda e: self._ui_show_about())
-        steam_info = CEFBridge.detect_steam_process()
-        steam_tag = "🟢 运行中" if steam_info['running'] else "⚫ 未运行"
-        acc_info = (f"👤 {self.current_account['persona_name']}  |  "
-                    f"ID: {self.current_account['friend_code']}  |  "
-                    f"Steam {steam_tag}")
+        acc_info = f"👤 {self.current_account['persona_name']}"
         self._acc_label = tk.Label(
             acc_frame, text=acc_info, font=("", 9, "bold"),
             bg="#4a90d9", fg="white")
         self._acc_label.pack(side=tk.LEFT, padx=(10, 6))
 
-        # CEF / Cloud 状态标签 + 设置 / 切换账号
-        _cef_init_text = ("CEF: 🟢已连接" if self._cef_bridge is not None
-                          else "CEF: 未连接")
-        _cef_init_fg = "white" if self._cef_bridge is not None else "#aac8ee"
-        self._cef_status_label = tk.Label(
-            acc_frame, text=_cef_init_text,
-            font=("", 8), bg="#4a90d9", fg=_cef_init_fg)
-        self._cef_status_label.pack(side=tk.LEFT, padx=(2, 6))
-
-        # 代理状态指示（动态更新）
-        self._proxy_status_label = tk.Label(
-            acc_frame, text="", font=("", 8),
-            bg="#4a90d9", fg="#aac8ee")
-        self._proxy_status_label.pack(side=tk.LEFT, padx=(2, 6))
+        # 技术状态标签（不显示在顶栏，保留属性供代码引用）
+        self._cef_status_label = tk.Label(acc_frame, bg="#4a90d9")
+        self._proxy_status_label = tk.Label(acc_frame, bg="#4a90d9")
+        self._ai_model_label = tk.Label(acc_frame, bg="#4a90d9")
         self._update_proxy_status()
-
-        # AI 模型指示（动态更新）
-        self._ai_model_label = tk.Label(
-            acc_frame, text="", font=("", 8),
-            bg="#4a90d9", fg="#aac8ee")
-        self._ai_model_label.pack(side=tk.LEFT, padx=(2, 6))
         self._update_ai_model_label()
 
-        # Cloud 上传状态（非阻塞进度显示，在 AI 模型右边）
+        # Cloud 上传状态（非阻塞进度显示）
         self._cloud_upload_label = tk.Label(
             acc_frame, text="", font=("", 8, "bold"),
             bg="#4a90d9", fg="#aac8ee")
@@ -1132,14 +1112,22 @@ class SteamToolboxMain(
             return
         iid = self._games_tree.identify_row(event.y)
         if not iid:
-            # 空白区域右键：只显示展开/收起
             menu = tk.Menu(self.root, tearoff=0)
+            menu.add_command(label="✅ 全选", command=self._select_all_games)
+            _ff = getattr(self, '_filter_frame', None)
+            if _ff:
+                _vis = _ff.winfo_ismapped()
+                menu.add_command(
+                    label="🔽 隐藏筛选" if _vis else "🔽 显示筛选",
+                    command=self._toggle_filter_frame)
+            menu.add_separator()
             menu.add_command(label="📂 展开全部笔记", command=self._expand_all_notes)
             menu.add_command(label="📁 收起全部笔记", command=self._collapse_all_notes)
             menu.add_separator()
             menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
             if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
-                menu.add_command(label="↩️ 还原库列表", command=self._lib_reset_coll_filters)
+                menu.add_command(label="↩️ 还原库列表",
+                                 command=self._lib_reset_coll_filters)
             self._smart_popup(menu, event.x_root, event.y_root)
             return
         current_sel = self._games_tree.selection()
@@ -1159,26 +1147,38 @@ class SteamToolboxMain(
             aid = app_ids[0]
             menu.add_command(label="📋 查看笔记", command=lambda: self._open_notes_viewer(aid))
             menu.add_command(label="📋 复制 AppID", command=lambda: self._copy_appid_silent(aid))
-            menu.add_separator()
-            menu.add_command(label="📤 导出笔记", command=self._ui_export_dialog)
-            if self.manager.is_dirty(aid):
-                menu.add_separator()
-                menu.add_command(label="☁️ 上传到 Steam Cloud",
-                                 command=lambda: self._cloud_upload_single(aid))
         else:
-            menu.add_command(label=f"📤 导出 ({len(app_ids)} 个游戏)",
-                             command=self._ui_export_dialog)
-            # 大量选中时用总 dirty count 避免逐个检查
-            dirty_n = self.manager.dirty_count() if self.manager else 0
-            if dirty_n > 0:
-                menu.add_command(label=f"☁️ 上传选中的改动",
-                                 command=self._cloud_upload_selected)
-        # 展开/收起
+            menu.add_command(label=f"📋 查看笔记 ({len(app_ids)} 个)",
+                             command=lambda: self._open_notes_viewer(app_ids[0]))
+        # 笔记操作子菜单
         menu.add_separator()
-        menu.add_command(label="📝 新建笔记", command=self._ui_create_note)
-        menu.add_command(label="📥 导入笔记", command=self._ui_import)
-        menu.add_command(label="🗑 删除笔记", command=self._ui_delete_notes)
-        # 展开/收起：根据当前状态决定是否显示
+        note_menu = tk.Menu(menu, tearoff=0)
+        note_menu.add_command(label="📝 新建笔记", command=self._ui_create_note)
+        note_menu.add_command(label="📥 导入笔记", command=self._ui_import)
+        if len(app_ids) == 1:
+            note_menu.add_command(label="📤 导出笔记", command=self._ui_export_dialog)
+        else:
+            note_menu.add_command(label=f"📤 导出 ({len(app_ids)} 个)",
+                                  command=self._ui_export_dialog)
+        note_menu.add_separator()
+        note_menu.add_command(label="🗑 删除笔记", command=self._ui_delete_notes)
+        menu.add_cascade(label="📝 笔记操作", menu=note_menu)
+        menu.add_command(label="🤖 AI 生成游戏说明",
+                         command=self._show_ai_gen_menu)
+        # Cloud 上传（条件显示）
+        dirty_n = self.manager.dirty_count() if self.manager else 0
+        if dirty_n > 0:
+            menu.add_separator()
+            if len(app_ids) == 1 and self.manager.is_dirty(app_ids[0]):
+                menu.add_command(label="☁️ 上传到 Steam Cloud",
+                                 command=lambda: self._cloud_upload_single(app_ids[0]))
+            elif len(app_ids) > 1:
+                menu.add_command(label="☁️ 上传选中的改动",
+                                 command=self._cloud_upload_selected)
+            menu.add_command(label=f"☁️ 全部上传({dirty_n})",
+                             command=self._cloud_upload_all)
+        # 视图操作
+        menu.add_separator()
         has_closed = has_open = False
         for iid in self._lib_tree.get_children():
             if self._lib_tree.get_children(iid):
@@ -1188,17 +1188,36 @@ class SteamToolboxMain(
                     has_closed = True
                 if has_closed and has_open:
                     break
-        if has_closed or has_open:
-            menu.add_separator()
         if has_closed:
             menu.add_command(label="📂 展开全部笔记", command=self._expand_all_notes)
         if has_open:
             menu.add_command(label="📁 收起全部笔记", command=self._collapse_all_notes)
+        menu.add_command(label="✅ 全选", command=self._select_all_games)
+        _ff = getattr(self, '_filter_frame', None)
+        if _ff:
+            _vis = _ff.winfo_ismapped()
+            menu.add_command(
+                label="🔽 隐藏筛选" if _vis else "🔽 显示筛选",
+                command=self._toggle_filter_frame)
         menu.add_separator()
         menu.add_command(label="🔄 刷新库列表", command=self._lib_refresh)
         if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
             menu.add_command(label="↩️ 还原库列表", command=self._lib_reset_coll_filters)
         self._smart_popup(menu, event.x_root, event.y_root)
+
+    def _toggle_filter_frame(self):
+        """切换筛选面板的显示/隐藏"""
+        ff = getattr(self, '_filter_frame', None)
+        if not ff:
+            return
+        if ff.winfo_ismapped():
+            ff.pack_forget()
+        else:
+            cfs = getattr(self, '_coll_filter_status', None)
+            if cfs and cfs.winfo_ismapped():
+                ff.pack(fill=tk.X, pady=(2, 0), after=cfs)
+            else:
+                ff.pack(fill=tk.X, pady=(2, 0))
 
     def _get_selected_app_id(self):
         """获取 Treeview 选中的第一个 AppID（兼容笔记子节点）"""

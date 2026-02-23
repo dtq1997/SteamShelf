@@ -459,21 +459,31 @@ class LibraryCollectionsMixin:
                              command=self._save_filter_as_collection)
             menu.add_separator()
         menu.add_command(label="➕ 新建空分类", command=self._lib_new_collection)
-        menu.add_separator()
-        menu.add_command(label="🤖 AI 智能筛选", command=self.ai_search_ui)
-        menu.add_command(label="⭐ 从推荐来源创建",
+        # 从来源创建（子菜单）
+        src_menu = tk.Menu(menu, tearoff=0)
+        src_menu.add_command(label="🤖 AI 智能筛选", command=self.ai_search_ui)
+        src_menu.add_command(label="⭐ 从推荐来源创建",
             command=lambda: self.personal_recommend_ui(sources='recommend'))
-        menu.add_command(label="🏆 从 Steam 列表页面创建", command=self.curator_sync_ui)
-        menu.add_command(label="📊 从 IGDB 数据库创建",
+        src_menu.add_command(label="🏆 从 Steam 列表页面创建",
+            command=self.curator_sync_ui)
+        src_menu.add_command(label="📊 从 IGDB 数据库创建",
             command=lambda: self.personal_recommend_ui(sources='igdb'))
-        menu.add_command(label="📊 从 SteamDB 创建", command=self.steamdb_sync_ui)
-        menu.add_separator()
-        menu.add_command(label="📁 从文件导入", command=self.import_collection)
-        menu.add_command(label="👤 从其他账号导入", command=self.import_from_account)
-        menu.add_command(label="👥 从好友游戏库创建", command=self.open_friend_sync_ui)
+        src_menu.add_command(label="📊 从 SteamDB 创建",
+            command=self.steamdb_sync_ui)
+        menu.add_cascade(label="🔍 从来源创建", menu=src_menu)
+        # 导入（子菜单）
+        imp_menu = tk.Menu(menu, tearoff=0)
+        imp_menu.add_command(label="📁 从文件导入", command=self.import_collection)
+        imp_menu.add_command(label="👤 从其他账号导入",
+            command=self.import_from_account)
+        imp_menu.add_command(label="👥 从好友游戏库创建",
+            command=self.open_friend_sync_ui)
+        menu.add_cascade(label="📥 导入", menu=imp_menu)
+        # 社区
         menu.add_separator()
         menu.add_command(label="🌐 浏览社区分类", command=self.browse_shared_ui)
-        menu.add_command(label="📤 分享我的分类", command=self.share_collections_ui)
+        menu.add_command(label="📤 分享我的分类",
+            command=self.share_collections_ui)
         if os.environ.get('STEAMSHELF_DEBUG_EXPR'):
             menu.add_separator()
             menu.add_command(label="🔍 检查表达式分类健康",
@@ -1906,21 +1916,23 @@ class LibraryCollectionsMixin:
                         command=lambda cid=col_id, cn=coll_name:
                             self._unbind_collection_source(cid, cn))
 
-            # 从各种来源更新（与创建菜单相同结构）
-            menu.add_separator()
-            menu.add_command(label="🤖 AI 智能筛选更新",
+            # 从各种来源更新（子菜单）
+            upd_menu = tk.Menu(menu, tearoff=0)
+            upd_menu.add_command(label="🤖 AI 智能筛选更新",
                 command=lambda tc=target_col: self.ai_search_ui(target_col=tc))
-            menu.add_command(label="⭐ 从推荐来源更新",
+            upd_menu.add_command(label="⭐ 从推荐来源更新",
                 command=lambda tc=target_col: self.personal_recommend_ui(target_col=tc, sources='recommend'))
-            menu.add_command(label="🏆 从 Steam 列表页面更新",
+            upd_menu.add_command(label="🏆 从 Steam 列表页面更新",
                 command=lambda tc=target_col: self.curator_sync_ui(target_col=tc))
-            menu.add_command(label="📊 从 IGDB 数据库更新",
+            upd_menu.add_command(label="📊 从 IGDB 数据库更新",
                 command=lambda tc=target_col: self.personal_recommend_ui(target_col=tc, sources='igdb'))
-            menu.add_command(label="📊 从 SteamDB 更新",
+            upd_menu.add_command(label="📊 从 SteamDB 更新",
                 command=lambda tc=target_col: self.steamdb_sync_ui(target_col=tc))
-            menu.add_separator()
-            menu.add_command(label="📁 从文件更新",
+            upd_menu.add_separator()
+            upd_menu.add_command(label="📁 从文件更新",
                 command=lambda tc=target_col: self.import_collection(target_col=tc))
+            menu.add_separator()
+            menu.add_cascade(label="🔍 从来源更新", menu=upd_menu)
             menu.add_separator()
             menu.add_command(label="📋 查看分类内容",
                 command=self._lib_toggle_view_collection)
