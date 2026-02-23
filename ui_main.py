@@ -42,6 +42,7 @@ from ui_backup import BackupMixin
 from ui_ai_inline_gen import InlineAIGenMixin
 from ui_ai_search import AISearchMixin
 from ui_updater import UpdaterMixin
+from ui_sharing import SharingMixin
 from ui_intro import SteamToolboxIntro
 
 from steam_data import get_game_name_from_steam, get_app_name_and_type, get_review_summary
@@ -60,7 +61,7 @@ class SteamToolboxMain(
     InlineAIGenMixin, AISearchMixin,
     ImportExportMixin, SettingsMixin,
     CollectionOpsMixin, CuratorMixin, RecommendMixin,
-    SteamDBMixin, BackupMixin, UpdaterMixin
+    SteamDBMixin, BackupMixin, UpdaterMixin, SharingMixin
 ):
     """
     SteamShelf 主界面（标签页版本）
@@ -97,6 +98,14 @@ class SteamToolboxMain(
         self._cache_lock = threading.Lock()  # 保护缓存持久化（防止多线程同时写盘）
         self._config_mgr = ConfigManager()
         self._config = self._config_mgr.raw  # 向后兼容：Mixin 直接访问 self._config
+        # 性能追踪：每次启动清空旧日志
+        from ui_utils import _PERF_ENABLED, _PERF_LOG_PATH, perf_log
+        if _PERF_ENABLED:
+            try:
+                open(_PERF_LOG_PATH, 'w').close()
+            except OSError:
+                pass
+            perf_log('APP_INIT start')
 
         # 收藏夹核心（来自软件 A）
         self._collections_core = None
@@ -112,6 +121,10 @@ class SteamToolboxMain(
 
         # 初始化笔记管理器
         self._init_notes_manager()
+
+        # 性能追踪：monkey-patch 关键方法
+        from ui_utils import perf_install_hooks
+        perf_install_hooks(self)
 
     def _init_notes_manager(self):
         """初始化笔记管理器"""
@@ -164,6 +177,39 @@ class SteamToolboxMain(
                 cef_ops + self._collections_core._pending_cef_ops)
         return result
 
+    def _get_owned_app_ids_set(self):
+        """CEF 获取已拥有 appid 集合，不可用时返回 None"""
+        if not self._cef_bridge or not self._cef_bridge.is_connected():
+            return None
+        try:
+            r = self._cef_bridge.get_all_owned_apps(
+                games_only=False, timeout=30)
+            if "apps" in r:
+                return {a["appid"] for a in r["apps"]}
+        except Exception:
+            pass
+        return None
+
+    def _ask_filter_owned(self, app_ids, *, parent=None):
+        """询问是否只保留已入库游戏。None=取消，CEF不可用→原样返回。"""
+        owned = self._get_owned_app_ids_set()
+        if owned is None:
+            return app_ids
+        kept = [a for a in app_ids if a in owned]
+        removed = len(app_ids) - len(kept)
+        if removed == 0:
+            return app_ids
+        r = messagebox.askyesnocancel(
+            "筛选已入库游戏",
+            f"共 {len(app_ids)} 个游戏，{len(kept)} 个已入库，"
+            f"{removed} 个未入库。\n\n"
+            "是否只保留已入库的游戏？\n\n"
+            "是 → 只保留已入库\n否 → 保留全部\n取消 → 取消创建",
+            parent=parent or self.root)
+        if r is None:
+            return None
+        return kept if r else app_ids
+
     def _do_cef_sync(self, cef_ops):
         """显示进度窗口并在后台线程执行 CEF 云同步"""
         if not self.root or not cef_ops:
@@ -189,7 +235,9 @@ class SteamToolboxMain(
 
             def finish():
                 pw.close()
-                self._ui_refresh()
+                # CEF 同步完成，清缓存并从 CEF 获取最新数据（含准确计数）
+                self._cef_collections_cache = None
+                self._lib_load_collections(skip_expression_update=True)
                 if fail > 0:
                     err_text = "\n".join(errors[:10])
                     messagebox.showwarning("云同步部分失败",
@@ -210,9 +258,18 @@ class SteamToolboxMain(
                 text="⚠️ 有未保存的更改", fg="orange")
 
     def _ui_refresh(self):
-        """刷新收藏夹列表 + 游戏列表"""
-        self._lib_load_collections()
-        self._lib_populate_tree(force_rebuild=True)
+        """刷新收藏夹列表，按需刷新游戏列表
+
+        用本地数据渲染分类树（CEF 同步完成后由 _do_cef_sync finish 补刷准确计数）。
+        仅在有活跃分类筛选时才重建游戏列表，否则跳过（省 ~500ms）。
+        """
+        from ui_utils import perf_log
+        perf_log('_ui_refresh', extra='START')
+        self._cef_collections_cache = None
+        self._lib_load_collections(force_local=True)
+        if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
+            self._lib_populate_tree(force_rebuild=True)
+        perf_log('_ui_refresh', extra='DONE')
 
     def _ui_get_selected(self):
         """获取左侧收藏夹树中选中的收藏夹（返回 legacy 格式 list[dict]）"""
@@ -237,6 +294,8 @@ class SteamToolboxMain(
 
     def _commit_collection_save(self):
         """储存收藏夹更改：备份 + 写入 + CEF 同步"""
+        from ui_utils import perf_log
+        perf_log('USER_ACTION', extra='commit_collection_save')
         if not self._has_pending_changes or self._pending_data is None:
             messagebox.showinfo("提示", "没有需要保存的更改。",
                                 parent=self.root)
@@ -253,7 +312,6 @@ class SteamToolboxMain(
                 self._coll_save_indicator.config(
                     text="✅ 所有更改已保存", fg="green")
             self._ui_refresh()
-
     # ═══════════════════════════════════════════════════════════════════════════════
     #  配置管理方法（来自软件 B）
     # ═══════════════════════════════════════════════════════════════════════════════
@@ -545,8 +603,9 @@ class SteamToolboxMain(
 
     def _ensure_game_name_cache_fast(self):
         """仅从持久化缓存快速加载游戏名称（不做任何网络请求）"""
-        if self._game_name_cache_loaded:
+        if self._game_name_cache_loaded or self._game_name_cache:
             return
+        self._config_mgr.load_caches()  # 延迟加载缓存文件
         self._game_name_cache.clear()
         self._game_name_cache.update(self._config.get("game_name_cache", {}))
         self._app_type_cache.clear()
@@ -570,12 +629,16 @@ class SteamToolboxMain(
             except Exception:
                 pass
         try:
+            old_size = len(self._game_name_cache)
             self._ensure_game_name_cache(force=False, progress_callback=_on_progress)
+            names_changed = len(self._game_name_cache) != old_size
             try:
                 self.root.after(0, lambda: self._hide_name_progress())
-                self.root.after(0, lambda: self._refresh_games_list())
-                # 同步刷新库管理标签页的收藏夹列表（名称缓存更新后）
-                self.root.after(0, lambda: self._lib_load_collections())
+                # 仅在名称缓存实际更新时才刷新 UI（避免冗余 rebuild）
+                if names_changed:
+                    self.root.after(0, lambda: self._lib_load_collections(
+                        skip_expression_update=True))
+                    self.root.after(0, self._lib_schedule_tree_rebuild)
             except Exception:
                 pass
             self._bg_resolve_missing_names()
@@ -745,8 +808,7 @@ class SteamToolboxMain(
         self._persist_all_caches()
         self._resolve_thread_running = False
         try:
-            self.root.after(0, lambda: self._lib_populate_tree(
-                force_rebuild=True))
+            self.root.after(0, self._lib_schedule_tree_rebuild)
         except Exception:
             pass
         # 接力：补查已入库游戏的发行日期
@@ -774,7 +836,7 @@ class SteamToolboxMain(
             self._config_mgr.raw["game_name_cache"] = dict(self._game_name_cache)
             self._config_mgr.raw["app_type_cache"] = dict(self._app_type_cache)
             self._config_mgr.raw["app_detail_cache"] = dict(self._app_detail_cache)
-            self._config_mgr.save()
+            self._config_mgr.save_caches()
 
     def _parse_remotecache_syncstates(self) -> dict:
         """解析 remotecache.vdf 获取每个笔记文件的 syncstate（mtime 缓存）"""

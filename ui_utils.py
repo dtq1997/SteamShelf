@@ -8,9 +8,115 @@ bg_thread — 后台线程装饰器（捕获异常防止静默失败）。
 
 import functools
 import logging
+import os
+import threading
+import time
 import traceback
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
+
+
+# ── 性能追踪器（STEAMSHELF_DEBUG=1 启用）──
+
+_PERF_ENABLED = os.environ.get('STEAMSHELF_DEBUG') == '1'
+_PERF_LOG_PATH = os.path.join(os.path.expanduser('~'), '.steam_toolkit', 'perf.log')
+_perf_t0 = time.perf_counter()  # app 启动基准时间
+
+
+def perf_log(label, elapsed_ms=None, extra=''):
+    """写一行性能日志。elapsed_ms=None 时仅记录时间戳。"""
+    if not _PERF_ENABLED:
+        return
+    now = time.perf_counter() - _perf_t0
+    tid = threading.current_thread().name
+    ms_part = f' {elapsed_ms:.0f}ms' if elapsed_ms is not None else ''
+    line = f'[{now:8.3f}s] [{tid:12s}]{ms_part} {label}'
+    if extra:
+        line += f'  ({extra})'
+    line += '\n'
+    try:
+        with open(_PERF_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(line)
+    except OSError as e:
+        print(f"[perf_log FAIL] {e}", flush=True)
+
+
+class perf_trace:
+    """计时上下文管理器。用法: with perf_trace('步骤名'): ..."""
+    __slots__ = ('label', 'extra', 't0')
+
+    def __init__(self, label, extra=''):
+        self.label = label
+        self.extra = extra
+
+    def __enter__(self):
+        if _PERF_ENABLED:
+            self.t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        if _PERF_ENABLED:
+            ms = (time.perf_counter() - self.t0) * 1000
+            perf_log(self.label, ms, self.extra)
+        return False
+
+
+def perf_install_hooks(obj):
+    """monkey-patch obj 的关键方法，自动记录每次调用耗时。
+    只在 STEAMSHELF_DEBUG=1 时生效，否则什么都不做。"""
+    if not _PERF_ENABLED:
+        return
+    # 要追踪的方法名列表（覆盖启动、加载、筛选、渲染全链路）
+    _METHODS = [
+        # ui_main.py
+        'show_main_window',
+        '_ensure_game_name_cache_fast',
+        '_bg_init_game_names',
+        '_save_and_sync',
+        '_refresh_games_list',
+        '_parse_remotecache_syncstates',
+        # ui_library.py
+        '_lib_populate_tree',
+        '_lib_populate_tree_core',
+        '_lib_load_notes_data',
+        '_bg_load_cef_data',
+        '_apply_sort_order',
+        '_auto_connect_cef',
+        '_lib_load_owned_from_cef',
+        # ui_library_collections.py
+        '_lib_load_collections',
+        '_lib_render_collections_cef',
+        '_lib_render_collections_local',
+        '_apply_coll_filters',
+        '_eval_coll_expr',
+        '_coll_filter_build_games',
+        '_eval_filter_expression',
+        '_auto_update_expression_collections',
+        '_schedule_expression_update',
+        '_cef_fetch_unowned_overviews',
+        # ui_collection_ops.py
+        '_update_all_cached_sources',
+        # core
+        '_ui_refresh',
+    ]
+    for name in _METHODS:
+        orig = getattr(obj, name, None)
+        if orig is None:
+            continue
+        # 用闭包捕获 orig 和 name
+        def _make_wrapper(_orig, _name):
+            @functools.wraps(_orig)
+            def wrapper(*a, **kw):
+                t = time.perf_counter()
+                try:
+                    return _orig(*a, **kw)
+                finally:
+                    ms = (time.perf_counter() - t) * 1000
+                    tid = threading.current_thread().name
+                    tag = '⚠️SLOW ' if ms > 100 else ''
+                    perf_log(f'{tag}{_name}', ms)
+            return wrapper
+        setattr(obj, name, _make_wrapper(orig, name))
 
 _OriginalToplevel = tk.Toplevel  # 保存原始 Toplevel，供内部使用
 

@@ -70,7 +70,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             values=["已入库", "全部", "未入库"], state='readonly')
         coll_filter_combo.pack(side=tk.LEFT, padx=(4, 0))
         coll_filter_combo.bind("<<ComboboxSelected>>",
-                                lambda e: (self._lib_load_collections(),
+                                lambda e: (self._lib_load_collections(
+                                               skip_expression_update=True),
                                            self._apply_coll_filters()))
 
         # 收藏夹列表
@@ -192,9 +193,12 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         filter_frame.pack(fill=tk.X, pady=(2, 0))
 
         # ── 收藏夹筛选状态行（有 +/- 时显示，初始隐藏） ──
-        self._coll_filter_status = tk.Label(
-            right, text="", font=("微软雅黑", 8), fg="#555",
-            anchor=tk.W, wraplength=600, justify=tk.LEFT)
+        self._coll_filter_status = tk.Text(
+            right, height=1, wrap=tk.WORD, font=("微软雅黑", 8),
+            bg=right.cget("bg"), bd=0, highlightthickness=0,
+            cursor="arrow", state=tk.DISABLED)
+        self._coll_ops_plus = []
+        self._coll_ops_minus = []
 
         # AI 筛选（合并了模型筛选：全部/🤖AI/📝未AI/具体模型名）
         self._ai_filter_var = tk.StringVar(value="全部")
@@ -437,8 +441,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         # 初始加载本地收藏夹数据（无需 CEF 连接）
         self._lib_load_collections()
 
-        # 初始加载笔记列表 — 先用缓存快速刷新，再后台加载全量名称
-        self._refresh_games_list_fast()
+        # 预加载名称缓存（不做 tree rebuild，等 _lib_load_initial bg 线程完成后统一 rebuild）
+        self._ensure_game_name_cache_fast()
         # 如果已有持久化缓存且未过期，隐藏进度条
         bulk_cache_ts = self._config.get("game_name_bulk_cache_ts", 0)
         if self._config.get("game_name_cache", {}) and (time.time() - bulk_cache_ts < 86400):
@@ -490,9 +494,9 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
     def _auto_connect_cef(self):
         """启动时自动尝试连接 CEF（后台检测，不阻塞 UI）"""
         if self._cef_bridge is not None:
-            return  # 已连接
+            return
         if CEFBridge is None:
-            return  # websocket-client 未安装
+            return
 
         def _bg_check():
             if not CEFBridge.is_available():
@@ -501,32 +505,52 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             ok, err = bridge.connect()
             if not ok:
                 return
-            # 连接成功，在主线程中更新 UI
-            def _apply():
+            def _set_bridge():
                 self._cef_bridge = bridge
                 self._update_library_cloud_status()
                 if self._collections_core:
                     self._collections_core.cef = bridge
                 self._lib_status.config(text="🔄 正在从 CEF 获取数据...")
-                self.root.update_idletasks()
-                self._lib_enhance_name_cache_from_cef()
-                self._lib_load_collections()
-                self._lib_load_owned_from_cef()
-            self.root.after(0, _apply)
+                self._bg_load_cef_data()
+            self.root.after(0, _set_bridge)
 
         threading.Thread(target=bg_thread(_bg_check), daemon=True).start()
 
     def _apply_cef_bridge(self):
         """bridge 已从 intro 传入时，立即应用（跳过连接步骤）"""
-        bridge = self._cef_bridge
         self._update_library_cloud_status()
         if self._collections_core:
-            self._collections_core.cef = bridge
+            self._collections_core.cef = self._cef_bridge
         self._lib_status.config(text="🔄 正在从 CEF 获取数据...")
-        self.root.update_idletasks()
-        self._lib_enhance_name_cache_from_cef()
-        self._lib_load_collections()
-        self._lib_load_owned_from_cef()
+        self._bg_load_cef_data()
+
+    def _bg_load_cef_data(self):
+        """后台加载 CEF 数据（名称缓存 + 收藏夹 + 游戏列表），不阻塞 UI"""
+        def _work():
+            self._lib_enhance_name_cache_from_cef()
+            # 先加载游戏列表（设置 _lib_all_games），再加载收藏夹
+            # 这样收藏夹触发的 expression update rebuild 已有完整游戏列表
+            self._lib_load_owned_from_cef()
+            # 后台预取收藏夹数据，避免主线程 CEF 调用
+            cef_colls = None
+            if self._cef_bridge and self._cef_bridge.is_connected():
+                try:
+                    cef_colls = self._cef_bridge.get_all_collections_with_apps(
+                        timeout=20)
+                    if "error" in cef_colls or "collections" not in cef_colls:
+                        cef_colls = None
+                except Exception:
+                    cef_colls = None
+
+            def _on_main():
+                self._lib_load_collections(
+                    prefetched_cef=cef_colls, skip_expression_update=True)
+                # 不再单独触发 tree rebuild：
+                # 1st rebuild 已用完整 CEF 游戏列表；
+                # _bg_init_game_names 完成后会触发名称更新 rebuild
+
+            self.root.after(0, _on_main)
+        threading.Thread(target=bg_thread(_work), daemon=True).start()
 
     def _lib_load_initial(self):
         """库管理标签页的初始数据加载"""
@@ -540,7 +564,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                     if 'owned' not in g:
                         g['owned'] = True
                 self._lib_all_games = games
-                self.root.after(0, lambda: self._lib_populate_tree(force_rebuild=True))
+                self.root.after(0, self._lib_schedule_tree_rebuild)
             except Exception as e:
                 msg = str(e)
                 print(f"[库管理] 加载失败: {msg}")
@@ -717,7 +741,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         return result
 
     def _lib_load_notes_data(self):
-        """加载笔记相关数据：笔记游戏列表、AI 笔记映射、同步状态映射"""
+        """加载笔记相关数据（2秒 TTL 缓存，避免重复扫描 4600+ 文件）"""
+        import time as _t
+        cache = getattr(self, '_notes_data_cache', None)
+        if cache and (_t.monotonic() - cache[0]) < 2.0:
+            return cache[1]
         notes_games = {}
         ai_notes_map = {}
         syncstate_map = {}
@@ -727,7 +755,13 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 syncstate_map = self._parse_remotecache_syncstates()
         except Exception:
             pass
-        return notes_games, ai_notes_map, syncstate_map
+        result = (notes_games, ai_notes_map, syncstate_map)
+        self._notes_data_cache = (_t.monotonic(), result)
+        return result
+
+    def _invalidate_notes_cache(self):
+        """笔记变更时调用，强制下次 _lib_load_notes_data 重新扫描"""
+        self._notes_data_cache = None
 
     def _lib_read_filter_state(self):
         """读取所有筛选器的当前状态，返回统一的筛选参数字典"""
@@ -829,7 +863,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         # 质量筛选
         if f['qual_filter'] != "质量":
             if "未评估" in f['qual_filter']:
-                if not has_ai or ai_info.get('qualities', []):
+                if has_ai and ai_info.get('qualities', []):
                     return False
             else:
                 qual_key = self._strip_filter_prefix(f['qual_filter'])
@@ -1023,6 +1057,21 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 else:
                     self._upload_all_btn.pack_forget()
 
+    def _lib_schedule_tree_rebuild(self):
+        """防抖合并：异步回调用此方法代替直接调用 _lib_populate_tree。
+        100ms 内的多次调用合并为一次 force_rebuild。"""
+        pending = getattr(self, '_tree_rebuild_timer', None)
+        if pending is not None:
+            self.root.after_cancel(pending)
+        self._tree_rebuild_timer = self.root.after(
+            100, self._lib_populate_tree_deferred)
+
+    def _lib_populate_tree_deferred(self):
+        """防抖定时器到期，执行实际 rebuild"""
+        self._tree_rebuild_timer = None
+        self._tree_rebuild_cache = None
+        self._lib_populate_tree()
+
     def _lib_populate_tree(self, force_rebuild=False):
         """填充统一游戏列表（库数据 + 笔记数据合并）"""
         tree = self._lib_tree
@@ -1068,6 +1117,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         # 获取笔记数据
         notes_games, ai_notes_map, syncstate_map = self._lib_load_notes_data()
+        from ui_utils import perf_log
+        perf_log('  tree_core: notes loaded', extra=f'{len(notes_games)} notes')
 
         # 获取筛选器状态
         filters = self._lib_read_filter_state()
@@ -1108,6 +1159,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         seen_aids = set()
         self._ai_sort_data = {}  # {aid: (source_rank, vol_rank, conf_rank, qual_rank)}
         self._sort_key_cache = {}  # {aid: {col: sort_value}} — 预缓存排序键
+        import time as _t; _loop_t0 = _t.perf_counter()
 
         for g in merged_games:
             aid = str(g['app_id']).split("::")[0]  # 防御性清理
@@ -1148,6 +1200,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                 not_owned_count += 1
 
         self._games_data = filtered_games
+        perf_log('  tree_core: insert loop', (_t.perf_counter() - _loop_t0) * 1000,
+                 f'{count} rows from {len(merged_games)} merged')
         self._lib_update_status_bar(count, owned_count, not_owned_count, notes_count)
 
         # 缓存重建数据（供 L4 快速筛选路径使用）
@@ -1331,16 +1385,12 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_populate_tree()
 
     def _lib_refresh(self):
-        """刷新库列表：CEF 已连接时从 CEF 获取全量，否则扫描本地已安装"""
+        """刷新库列表：CEF 已连接时后台获取全量，否则扫描本地已安装"""
         self._lib_status.config(text="🔄 正在刷新...")
 
         if self._cef_bridge and self._cef_bridge.is_connected():
-            # CEF 已连接：重新获取完整游戏列表 + 收藏夹
-            self._lib_enhance_name_cache_from_cef()
-            self._lib_load_owned_from_cef()
-            self._lib_load_collections()
+            self._bg_load_cef_data()
         else:
-            # 无 CEF：扫描本地已安装游戏
             self._lib_all_games = []
             self._lib_load_initial()
             self._lib_load_collections()

@@ -480,11 +480,33 @@ class RecommendMixin:
                     name_entries[key] = name_var
 
                 def confirm_create():
+                    owned_set = self._get_owned_app_ids_set()
+                    filter_owned = False
+                    if owned_set is not None:
+                        all_ids = set()
+                        for d in fetched_data.values():
+                            all_ids.update(d['ids'])
+                        removed = len(all_ids) - len(all_ids & owned_set)
+                        if removed > 0:
+                            r = messagebox.askyesnocancel(
+                                "筛选已入库游戏",
+                                f"共 {len(all_ids)} 个不重复游戏，"
+                                f"{removed} 个未入库。\n\n"
+                                "是否只保留已入库的游戏？",
+                                parent=name_win)
+                            if r is None:
+                                return
+                            filter_owned = r
+
+                    created = 0
                     for key, d in fetched_data.items():
                         new_name = name_entries[key].get().strip()
                         if new_name:
+                            ids = [a for a in d['ids'] if a in owned_set] \
+                                if filter_owned else d['ids']
                             col_id = self._collections_core.add_static_collection(
-                                data, new_name, d['ids'])
+                                data, new_name, ids)
+                            created += 1
                             if col_id and d.get('source_type') and key != '_merged':
                                 mode_map = {"增量": "incremental",
                                             "增量+辅助": "incremental_aux",
@@ -495,11 +517,13 @@ class RecommendMixin:
                                     d['name'],
                                     mode_map.get(mode_combo.get(),
                                                  'incremental'))
+                    if not created:
+                        return
                     self._save_and_sync(
                         data,
                         backup_description="从个人推荐分类创建收藏夹")
                     messagebox.showinfo("成功",
-                        f"已创建 {len(fetched_data)} 个收藏夹。"
+                        f"已创建 {created} 个收藏夹。"
                         + disclaimer, parent=name_win)
                     name_win.destroy()
                     self._ui_refresh()

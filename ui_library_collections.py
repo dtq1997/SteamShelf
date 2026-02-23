@@ -87,51 +87,56 @@ class LibraryCollectionsMixin:
             return img, ("coll_minus",)
         return img, ()
 
-    def _lib_load_collections(self):
+    def _lib_load_collections(self, prefetched_cef=None,
+                              skip_expression_update=False, force_local=False):
         """加载 Steam 收藏夹
 
         数据来源优先级：
-        1. CEF 已连接 → 通过 get_all_collections_with_apps() 获取实时数据
-           （解决动态分类、不拥有的 AppID、完整游戏列表三个问题）
-        2. CEF 未连接 → 从本地 JSON 文件读取（回退方案）
+        1. prefetched_cef 已提供 → 直接使用（后台预取，零阻塞）
+        2. CEF 缓存 / 实时获取（force_local=True 时跳过）
+        3. 本地 JSON 文件（回退方案）
         """
         if not hasattr(self, '_coll_tree'):
             return
         coll_tree = self._coll_tree
         coll_tree.delete(*coll_tree.get_children())
 
-        # CollectionsCore 初始化
-        storage_path = getattr(self.current_account, 'storage_path', None)
-        if CollectionsCore is not None and storage_path:
-            try:
-                core = CollectionsCore(self.current_account, self._config_mgr)
-                # 将 CEF 桥接器传给 core（用于后续的 CEF 同步操作）
-                if self._cef_bridge is not None:
-                    core.cef = self._cef_bridge
-                self._collections_core = core
-            except Exception as e:
-                print(f"[库管理] CollectionsCore 初始化失败: {e}")
-                self._collections_core = None
+        # CollectionsCore：复用已有实例，仅首次创建
+        if self._collections_core is None:
+            storage_path = getattr(self.current_account, 'storage_path', None)
+            if CollectionsCore is not None and storage_path:
+                try:
+                    self._collections_core = CollectionsCore(
+                        self.current_account, self._config_mgr)
+                except Exception as e:
+                    print(f"[库管理] CollectionsCore 初始化失败: {e}")
+        if self._collections_core and self._cef_bridge is not None:
+            self._collections_core.cef = self._cef_bridge
 
-        # ── 尝试 CEF 实时数据 ──
+        # ── CEF 数据（预取 > 缓存 > 实时获取 > 本地） ──
         cef_data = None
-        if self._cef_bridge is not None and self._cef_bridge.is_connected():
-            try:
-                cef_data = self._cef_bridge.get_all_collections_with_apps(timeout=20)
-                if "error" in cef_data or "collections" not in cef_data:
-                    print(f"[库管理] CEF 查询错误: {cef_data.get('error', '未知')}")
-                    cef_data = None
-            except Exception as e:
-                print(f"[库管理] CEF 查询异常: {e}")
-                cef_data = None
+        if not force_local:
+            if prefetched_cef and "collections" in prefetched_cef:
+                self._cef_collections_cache = prefetched_cef
+            cef_data = prefetched_cef or getattr(self, '_cef_collections_cache', None)
+            # 缓存被清除且 CEF 已连接 → 重新获取最新数据
+            if cef_data is None and self._cef_bridge and self._cef_bridge.is_connected():
+                try:
+                    fresh = self._cef_bridge.get_all_collections_with_apps(timeout=20)
+                    if fresh and "collections" in fresh:
+                        self._cef_collections_cache = fresh
+                        cef_data = fresh
+                except Exception:
+                    pass
 
         if cef_data and "collections" in cef_data:
             self._lib_render_collections_cef(coll_tree, cef_data["collections"])
         else:
             self._lib_render_collections_local(coll_tree)
 
-        # 自动更新 expression 类型的绑定分类
-        self._auto_update_expression_collections()
+        # 自动更新 expression 类型的绑定分类（后台线程，不阻塞 UI）
+        if not skip_expression_update:
+            self._schedule_expression_update()
 
     def _lib_render_collections_cef(self, coll_tree, cef_collections: dict):
         """使用 CEF 实时数据渲染收藏夹列表
@@ -389,10 +394,11 @@ class LibraryCollectionsMixin:
             print(f"[库管理] CEF游戏类型统计: {type_stats}")
             cef_games.sort(key=lambda g: steam_sort_key(g['name']))
             self._lib_all_games = cef_games
-            self._lib_populate_tree(force_rebuild=True)
+            # rebuild 由调用方（_bg_load_cef_data）统一调度，此处不再重复触发
         except Exception as e:
             print(f"[库管理] CEF 加载游戏列表失败: {e}")
-            self._lib_status.config(text=f"⚠️ CEF 游戏列表加载失败: {e}")
+            self.root.after(0, lambda: self._lib_status.config(
+                text=f"⚠️ CEF 游戏列表加载失败: {e}"))
 
     @staticmethod
     def _guess_type_from_name(name: str) -> int:
@@ -423,11 +429,21 @@ class LibraryCollectionsMixin:
 
     def _show_create_collection_menu(self, event=None):
         """弹出创建分类菜单（统一所有收藏夹创建入口）"""
+        from ui_utils import perf_log
+        perf_log('USER_ACTION', extra='create_collection_menu')
         menu = tk.Menu(self.root, tearoff=0)
-        # 有活跃 +/- 筛选时，显示"保存筛选为分类"
-        active = [s for s in self._coll_filter_states.values()
-                  if s != 'default']
-        if len(active) >= 2:
+        # 有任何活跃筛选时，显示"保存筛选为分类"
+        has_coll_filter = any(
+            s != 'default' for s in self._coll_filter_states.values())
+        filters = self._lib_read_filter_state()
+        _defaults = {'filter_mode': '全部', 'model_filter': None,
+                     'dirty_only': False, 'uploading_only': False,
+                     'source_filter': '来源', 'conf_filter': '确信度',
+                     'vol_filter': '信息量', 'qual_filter': '质量'}
+        has_game_filter = any(
+            filters.get(k) != v for k, v in _defaults.items())
+        has_search = bool(self._lib_search_var.get().strip())
+        if has_coll_filter or has_game_filter or has_search:
             menu.add_command(label="📐 将当前筛选保存为分类",
                              command=self._save_filter_as_collection)
             menu.add_separator()
@@ -444,6 +460,9 @@ class LibraryCollectionsMixin:
         menu.add_command(label="📁 从文件导入", command=self.import_collection)
         menu.add_command(label="👤 从其他账号导入", command=self.import_from_account)
         menu.add_command(label="👥 从好友游戏库创建", command=self.open_friend_sync_ui)
+        menu.add_separator()
+        menu.add_command(label="🌐 浏览社区分类", command=self.browse_shared_ui)
+        menu.add_command(label="📤 分享我的分类", command=self.share_collections_ui)
         # 在按钮上方弹出
         btn = self._create_coll_btn
         menu_h = menu.yposition("end") + 30  # 最后一项 y + 项高 + 边距
@@ -512,10 +531,26 @@ class LibraryCollectionsMixin:
             'search_mode': self._main_search_mode.get(),
         }
 
-    def _eval_filter_expression(self, params):
-        """求值筛选表达式，返回 app_id 字符串列表"""
-        cache = getattr(self, '_coll_data_cache', {})
-        if not cache:
+    @staticmethod
+    def _expr_needs_notes(params):
+        """检查表达式参数是否需要笔记数据（AI/来源/确信度等筛选）"""
+        f = params.get('filters', {})
+        return (f.get('filter_mode') not in (None, '全部')
+                or f.get('model_filter') is not None
+                or f.get('dirty_only') or f.get('uploading_only')
+                or f.get('source_filter', '来源') != '来源'
+                or f.get('vol_filter', '信息量') != '信息量'
+                or f.get('conf_filter', '确信度') != '确信度'
+                or f.get('qual_filter', '质量') != '质量')
+
+    def _eval_filter_expression(self, params, notes_data=None):
+        """求值筛选表达式，返回 app_id 字符串列表
+
+        notes_data: 可选 (notes_games, ai_map, sync_map) 元组，
+                    传入时复用避免重复 scan_all。
+        """
+        coll_cache = getattr(self, '_coll_data_cache', {})
+        if not coll_cache:
             return []
         states = params.get('coll_filter_states', {})
         plus_ids = [c for c, s in states.items() if s == 'plus']
@@ -547,7 +582,25 @@ class LibraryCollectionsMixin:
         type_f = set(params.get('type_filter', []))
         sq = params.get('search_q', '').lower()
         sm = params.get('search_mode', 'name')
-        notes_games, ai_map, sync_map = self._lib_load_notes_data()
+
+        # 类型查找表（O(1) 替代 _guess_type_for_aid 的 O(N) 线性扫描）
+        need_type = type_f and len(type_f) < len(self._ALL_TYPES)
+        if need_type:
+            type_map = {str(g.get('app_id')): self._get_type_name(
+                g.get('type') or g.get('app_type') or g.get('nAppType') or 1)
+                for g in (self._lib_all_games_backup or self._lib_all_games)}
+
+        # 笔记数据：无笔记筛选时用空 dict（零 I/O），否则复用传入或缓存
+        if not self._expr_needs_notes(params):
+            notes_games, ai_map, sync_map = {}, {}, {}
+        elif notes_data:
+            notes_games, ai_map, sync_map = notes_data
+        else:
+            rc = getattr(self, '_tree_rebuild_cache', None)
+            if rc:
+                notes_games, ai_map, sync_map = rc['notes'], rc['ai'], rc['sync']
+            else:
+                notes_games, ai_map, sync_map = self._lib_load_notes_data()
 
         result = []
         for aid in candidates:
@@ -557,9 +610,8 @@ class LibraryCollectionsMixin:
             is_up = sync_map.get(aid) == 3
             name = self._game_name_cache.get(aid, f"AppID {aid}")
             # 类型筛选
-            if type_f and len(type_f) < len(self._ALL_TYPES):
-                g_type = self._guess_type_for_aid(aid)
-                if g_type not in type_f:
+            if need_type:
+                if type_map.get(aid, "Game") not in type_f:
                     continue
             if not self._lib_should_include_game(
                     aid, has_ai, is_dirty, is_up, ai_map, filters,
@@ -596,8 +648,33 @@ class LibraryCollectionsMixin:
             parts.append(f"🔍{params['search_q'][:6]}")
         return " | ".join(parts) or "筛选表达式"
 
+    def _schedule_expression_update(self):
+        """将表达式自动更新调度到后台线程，不阻塞 UI"""
+        if getattr(self, '_expression_updating', False):
+            return
+        # 快速检查：无表达式分类时跳过（避免无谓的线程+tree rebuild）
+        if self._collections_core:
+            all_src = self._collections_core._get_all_sources()
+            if not any(v.get('source_type') == 'expression'
+                       for v in all_src.values()):
+                return
+
+        def _bg():
+            changed = self._auto_update_expression_collections()
+            if changed:
+                try:
+                    self.root.after(0, self._lib_schedule_tree_rebuild)
+                except Exception:
+                    pass
+
+        threading.Thread(target=bg_thread(_bg), daemon=True).start()
+
     def _auto_update_expression_collections(self):
-        """自动更新所有 expression 类型的绑定分类（_lib_load_collections 末尾调用）"""
+        """自动更新所有 expression 类型的绑定分类（_lib_load_collections 末尾调用）
+
+        多轮收敛：表达式可能引用其他表达式，单次遍历顺序不确定，
+        因此循环直到无变化（最多 5 轮），每轮更新后同步刷新缓存。
+        """
         if getattr(self, '_expression_updating', False):
             return
         if not self._collections_core:
@@ -612,36 +689,73 @@ class LibraryCollectionsMixin:
         if data is None:
             return
 
+        owned_set = set(
+            str(g['app_id']) for g in
+            (self._lib_all_games_backup or self._lib_all_games)
+            if g.get('owned'))
+
+        # 预加载笔记数据（仅当任一表达式需要时），所有表达式共享同一份
+        needs_notes = any(
+            self._expr_needs_notes(v.get('source_params', {}))
+            for v in expr_sources.values())
+        if needs_notes:
+            rc = getattr(self, '_tree_rebuild_cache', None)
+            nd = (rc['notes'], rc['ai'], rc['sync']) if rc else self._lib_load_notes_data()
+        else:
+            nd = ({}, {}, {})
+
         changed = False
         self._expression_updating = True
         try:
-            for col_id, src_info in expr_sources.items():
-                params = src_info.get('source_params', {})
-                new_ids = set(self._eval_filter_expression(params))
-                # 找到当前 entry 比较
-                for entry in data:
-                    if entry[0] != f"user-collections.{col_id}":
-                        continue
-                    meta = entry[1]
-                    if meta.get("is_deleted") or "value" not in meta:
-                        break
-                    val = json.loads(meta['value'])
-                    old_ids = set(str(a) for a in val.get('added', []))
-                    if new_ids != old_ids:
-                        int_ids = [int(a) for a in new_ids if a.isdigit()]
-                        val['added'] = int_ids
-                        meta['value'] = json.dumps(
-                            val, ensure_ascii=False, separators=(',', ':'))
-                        meta['timestamp'] = int(time.time())
-                        self._collections_core.queue_cef_upsert(
-                            col_id, val.get('name', ''), int_ids)
+            for _pass in range(5):
+                pass_changed = False
+                for col_id, src_info in expr_sources.items():
+                    params = src_info.get('source_params', {})
+                    new_ids = set(self._eval_filter_expression(params, notes_data=nd))
+                    if self._apply_expression_update(
+                            data, col_id, new_ids, owned_set):
+                        pass_changed = True
                         changed = True
+                if not pass_changed:
                     break
         finally:
             self._expression_updating = False
 
         if changed:
-            self._save_and_sync(data, backup_description="自动更新筛选表达式分类")
+            # 只写本地 JSON，不触发 CEF 模态同步（启动时弹窗体验差）
+            self._collections_core.pop_pending_cef_ops()  # 丢弃队列
+            self._collections_core.save_json(
+                data, backup_description="自动更新筛选表达式分类")
+        return changed
+
+    def _apply_expression_update(self, data, col_id, new_ids, owned_set):
+        """更新单个表达式分类的 JSON 数据 + 缓存，返回是否有变化"""
+        for entry in data:
+            if entry[0] != f"user-collections.{col_id}":
+                continue
+            meta = entry[1]
+            if meta.get("is_deleted") or "value" not in meta:
+                return False
+            val = json.loads(meta['value'])
+            old_ids = set(str(a) for a in val.get('added', []))
+            if new_ids == old_ids:
+                return False
+            int_ids = [int(a) for a in new_ids if a.isdigit()]
+            val['added'] = int_ids
+            meta['value'] = json.dumps(
+                val, ensure_ascii=False, separators=(',', ':'))
+            meta['timestamp'] = int(time.time())
+            self._collections_core.queue_cef_upsert(
+                col_id, val.get('name', ''), int_ids)
+            # 同步刷新缓存，让后续表达式看到新数据
+            cache = getattr(self, '_coll_data_cache', {})
+            if col_id in cache:
+                cache[col_id]['owned_app_ids'] = [
+                    a for a in new_ids if a in owned_set]
+                cache[col_id]['not_owned_app_ids'] = [
+                    a for a in new_ids if a not in owned_set]
+            return True
+        return False
 
     def _update_expression_upstream(self, col_id, source_info):
         """对 expression 分类点"更新来源"→ 更新其引用的上游绑定分类"""
@@ -677,7 +791,9 @@ class LibraryCollectionsMixin:
 
     def _batch_set_coll_filter(self, state):
         """批量设置选中收藏夹的筛选状态（'plus'/'minus'/'default'）"""
+        from ui_utils import perf_log
         sel = self._coll_tree.selection()
+        perf_log('USER_ACTION', extra=f'batch_filter state={state} sel={list(sel)}')
         if not sel:
             return
         for col_id in sel:
@@ -989,7 +1105,11 @@ class LibraryCollectionsMixin:
         # "未入库"模式：强制 owned 为空，避免跨收藏夹重叠导致 is_owned 误判
         effective_owned = set() if show_mode == "未入库" else owned_app_ids
         games = self._coll_filter_build_games(all_app_ids, effective_owned)
+        from ui_utils import perf_log
+        import time as _t; _sort_t0 = _t.perf_counter()
         games.sort(key=lambda g: steam_sort_key(g['name']))
+        perf_log('  coll_filters: sort', (_t.perf_counter() - _sort_t0) * 1000,
+                 f'{len(games)} games, mode={show_mode}, implicit={implicit_all}')
         self._lib_all_games = games
         self._viewing_collections = True
         self._lib_populate_tree(force_rebuild=True)
@@ -1405,13 +1525,15 @@ class LibraryCollectionsMixin:
 
     def _on_coll_right_click(self, event):
         """收藏夹树右键菜单"""
+        from ui_utils import perf_log
+        perf_log('USER_ACTION', extra=f'coll_right_click sel={list(self._coll_tree.selection())}')
         menu = tk.Menu(self.root, tearoff=0)
 
         sel = self._coll_tree.selection()
         if sel and len(sel) == 1:
             col_id = sel[0]
             coll_data = self._coll_data_cache.get(col_id)
-            coll_name = coll_data['name'] if coll_data else col_id
+            coll_name = coll_data.get('name', col_id) if coll_data else col_id
             target_col = (col_id, coll_name)
 
             menu.add_command(label="🔄 更新分类", command=self.update_static_collection)
@@ -1440,6 +1562,9 @@ class LibraryCollectionsMixin:
                 command=self._lib_toggle_view_collection)
             menu.add_command(label="📤 导出分类",
                 command=self.export_static_collection)
+            menu.add_command(label="🌐 分享到社区",
+                command=lambda c=sel[0]: self.share_collections_ui(
+                    preselected=[c]))
 
         # 检查选中收藏夹是否有缓存来源
         if sel and len(sel) == 1 and self._collections_core:
@@ -1550,11 +1675,19 @@ class LibraryCollectionsMixin:
         x, y, w, h = bbox
         current_name = coll_data['name']
 
-        entry = tk.Entry(tree, font=("", 10))
+        # 动态定位：扫描找到 text 元素的起始 x 坐标
+        text_x = x + 28  # 默认值（image 14px + indent 14px）
+        mid_y = y + h // 2
+        for px in range(x, x + 60, 2):
+            if 'text' in str(tree.identify_element(px, mid_y)):
+                text_x = px
+                break
+
+        entry = tk.Entry(tree, font="TkDefaultFont")
         self._rename_entry = entry
         entry.insert(0, current_name)
         entry.select_range(0, tk.END)
-        entry.place(x=x + 20, y=y, width=w - 20, height=h)
+        entry.place(x=text_x, y=y, width=w - text_x + x, height=h)
         entry.focus_set()
 
         def commit(e=None):
@@ -1575,6 +1708,8 @@ class LibraryCollectionsMixin:
 
     def _cef_rename_collection(self, col_id, new_name):
         """CEF 执行重命名 + SaveCollection 云同步"""
+        from ui_utils import perf_log
+        perf_log('USER_ACTION', extra=f'rename_collection {new_name}')
         import json
         result = self._cef_bridge._eval_js(f'''
 (async function() {{
@@ -1588,7 +1723,19 @@ class LibraryCollectionsMixin:
 }})()
 ''', timeout=15)
         if isinstance(result, dict) and result.get('ok'):
-            self._lib_load_collections()
+            # 局部更新：只改节点文字，不重建 33645 行游戏列表
+            cd = self._coll_data_cache.get(col_id)
+            if cd:
+                old_text = self._coll_tree.item(col_id, 'text')
+                new_text = old_text.replace(cd['name'], new_name, 1)
+                self._coll_tree.item(col_id, text=new_text)
+                cd['name'] = new_name
+                # 同步更新 CEF 缓存
+                cef_cache = getattr(self, '_cef_collections_cache', None)
+                if cef_cache and col_id in cef_cache.get('collections', {}):
+                    cef_cache['collections'][col_id]['name'] = new_name
+            else:
+                self._ui_refresh()
         elif isinstance(result, dict) and result.get('error'):
             messagebox.showerror("重命名失败", result['error'],
                                  parent=self.root)
@@ -1878,6 +2025,9 @@ class LibraryCollectionsMixin:
 
     def _lib_delete_collection(self):
         """删除选中的收藏夹（支持多选）"""
+        print("[DEBUG] _lib_delete_collection CALLED", flush=True)
+        from ui_utils import perf_log
+        perf_log('USER_ACTION', extra='delete_collection')
         sel = self._coll_tree.selection()
         if not sel:
             messagebox.showinfo("提示", "请先选择要删除的分类。",
@@ -1929,7 +2079,24 @@ class LibraryCollectionsMixin:
             self._collections_core.save_json(
                 data, backup_description=f"删除 {len(sel)} 个分类")
 
-        self._lib_load_collections()
+        # 局部更新：只移除节点，不重建 33645 行游戏列表
+        needs_game_rebuild = any(
+            self._coll_filter_states.get(cid) in ('plus', 'minus')
+            for cid in sel)
+        for cid in sel:
+            self._coll_filter_states.pop(cid, None)
+            self._coll_data_cache.pop(cid, None)
+            try:
+                self._coll_tree.delete(cid)
+            except Exception:
+                pass
+        # 同步 CEF 缓存
+        cef_cache = getattr(self, '_cef_collections_cache', None)
+        if cef_cache and 'collections' in cef_cache:
+            for cid in sel:
+                cef_cache['collections'].pop(cid, None)
+        if needs_game_rebuild:
+            self._lib_populate_tree(force_rebuild=True)
 
         if errors:
             messagebox.showwarning("部分删除失败",
@@ -1991,7 +2158,7 @@ class LibraryCollectionsMixin:
 
         self._collections_core.save_json(
             data, backup_description=f"清理DLC: 移除{total_removed}条")
-        self._lib_load_collections()
+        self._ui_refresh()
         messagebox.showinfo("清理完成",
             f"已从 {affected_cols} 个分类中移除 {total_removed} 条 DLC appid。",
             parent=self.root)

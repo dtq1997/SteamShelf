@@ -98,6 +98,11 @@ class CollectionOpsMixin:
         existing = self._collections_core.get_all_collections_ordered(data)
         self._original_col_ids = {c['id'] for c in existing}
 
+        # txt 文件导入时询问是否筛选已入库
+        owned_filter = self._ask_txt_import_owned_filter(paths)
+        if owned_filter is self._CANCEL:
+            return
+
         import_echo = [""]
 
         for path in paths:
@@ -106,7 +111,7 @@ class CollectionOpsMixin:
                 ext = os.path.splitext(path)[1].lower()
                 if ext == ".txt":
                     count, err = self._collections_core.import_collections_appid_list(
-                        path, data)
+                        path, data, owned_filter=owned_filter)
                 elif ext == ".json":
                     count, err = self._collections_core.import_collections_structured(
                         path, data)
@@ -814,27 +819,111 @@ class CollectionOpsMixin:
 
         self._center_window(win)
 
+    _CANCEL = object()  # 哨兵值：用户取消
+
+    def _ask_txt_import_owned_filter(self, paths):
+        """预读 txt 文件收集 ID，询问是否筛选已入库。
+        返回 owned_set（筛选）/ None（不筛选）/ _CANCEL（取消）。"""
+        txt_paths = [p for p in paths
+                     if os.path.splitext(p)[1].lower() == '.txt']
+        if not txt_paths:
+            return None
+        owned_set = self._get_owned_app_ids_set()
+        if owned_set is None:
+            return None
+        all_ids = set()
+        for p in txt_paths:
+            with open(p, 'r', encoding='utf-8') as f:
+                all_ids.update(int(ln.strip()) for ln in f
+                               if ln.strip().isdigit())
+        removed = len(all_ids) - len(all_ids & owned_set)
+        if removed == 0:
+            return None
+        r = messagebox.askyesnocancel(
+            "筛选已入库游戏",
+            f"共 {len(all_ids)} 个不重复游戏，"
+            f"{removed} 个未入库。\n\n"
+            "是否只保留已入库的游戏？",
+            parent=self.root)
+        if r is None:
+            return self._CANCEL
+        return owned_set if r else None
+
+    def _ask_batch_owned_filter(self, all_app_ids, parent=None):
+        """批量场景：询问一次是否筛选已入库。返回 (owned_set|None, filter_bool)，
+        owned_set=None 表示 CEF 不可用，filter=True 表示用户选了筛选。
+        返回 None 表示用户取消。"""
+        owned_set = self._get_owned_app_ids_set()
+        if owned_set is None:
+            return owned_set, False
+        removed = len(all_app_ids) - len(all_app_ids & owned_set)
+        if removed == 0:
+            return owned_set, False
+        r = messagebox.askyesnocancel(
+            "筛选已入库游戏",
+            f"共涉及 {len(all_app_ids)} 个不重复游戏，"
+            f"{removed} 个未入库。\n\n"
+            "是否只保留已入库的游戏？",
+            parent=parent or self.root)
+        if r is None:
+            return None, None  # 用户取消
+        return owned_set, r
+
+    def _merge_into_existing(self, data, entry, val, name, app_ids):
+        """将 app_ids 合并到已有分类，返回新建的 col_id 或 None"""
+        old_set = set(val.get('added', []))
+        combined = list(old_set | set(app_ids))
+        if len(combined) <= len(old_set):
+            return None
+        val['added'] = combined
+        entry[1]['value'] = json.dumps(
+            val, ensure_ascii=False, separators=(',', ':'))
+        import time as _time
+        entry[1]['timestamp'] = int(_time.time())
+        entry[1]['version'] = self._collections_core.next_version(data)
+        col_id = val.get('id', '')
+        if col_id:
+            self._collections_core.queue_cef_upsert(
+                col_id, name, combined)
+            return col_id
+        return None
+
+    def _build_existing_map(self, data):
+        """构建 name→(entry, val) 映射，用于合并模式"""
+        existing_map = {}
+        for entry in data:
+            key = entry[0] if isinstance(entry, list) else ""
+            meta = entry[1] if isinstance(entry, list) and len(entry) > 1 else {}
+            if not key.startswith("user-collections."):
+                continue
+            if meta.get("is_deleted") or "value" not in meta:
+                continue
+            try:
+                val = json.loads(meta['value'])
+                existing_map[val.get('name', '')] = (entry, val)
+            except Exception:
+                pass
+        return existing_map
+
     def _execute_bulk_import(self, collections, conflict_mode, existing_names):
         """执行批量导入：本地创建 + 分批云同步（带进度条）"""
         data = self._collections_core.load_json()
         if data is None:
             return
 
-        # 合并模式：获取已有分类 name→(entry, val) 映射
-        existing_map = {}
-        if conflict_mode == 'merge':
-            for entry in data:
-                key = entry[0] if isinstance(entry, list) else ""
-                meta = entry[1] if isinstance(entry, list) and len(entry) > 1 else {}
-                if not key.startswith("user-collections."):
-                    continue
-                if meta.get("is_deleted") or "value" not in meta:
-                    continue
-                try:
-                    val = json.loads(meta['value'])
-                    existing_map[val.get('name', '')] = (entry, val)
-                except Exception:
-                    pass
+        # 询问是否只保留已入库游戏（一次性）
+        all_ids = set()
+        for c in collections:
+            if not c.get('is_dynamic'):
+                all_ids.update(c['app_ids'])
+        result = self._ask_batch_owned_filter(all_ids)
+        if result[1] is None:
+            return
+        owned_set, filter_owned = result
+
+        # 合并模式：获取已有分类映射
+        existing_map = self._build_existing_map(data) \
+            if conflict_mode == 'merge' else {}
 
         created_ids = []
         skipped = 0
@@ -843,6 +932,8 @@ class CollectionOpsMixin:
         for coll in collections:
             name = coll['name']
             app_ids = coll['app_ids']
+            if filter_owned:
+                app_ids = [a for a in app_ids if a in owned_set]
             is_dup = name in existing_names
 
             if is_dup:
@@ -851,21 +942,10 @@ class CollectionOpsMixin:
                     continue
                 elif conflict_mode == 'merge' and name in existing_map:
                     entry, val = existing_map[name]
-                    old_set = set(val.get('added', []))
-                    combined = list(old_set | set(app_ids))
-                    if len(combined) > len(old_set):
-                        val['added'] = combined
-                        entry[1]['value'] = json.dumps(
-                            val, ensure_ascii=False, separators=(',', ':'))
-                        import time as _time
-                        entry[1]['timestamp'] = int(_time.time())
-                        entry[1]['version'] = \
-                            self._collections_core.next_version(data)
-                        col_id = val.get('id', '')
-                        if col_id:
-                            self._collections_core.queue_cef_upsert(
-                                col_id, name, combined)
-                            created_ids.append(col_id)
+                    col_id = self._merge_into_existing(
+                        data, entry, val, name, app_ids)
+                    if col_id:
+                        created_ids.append(col_id)
                     merged += 1
                     continue
                 else:  # copy

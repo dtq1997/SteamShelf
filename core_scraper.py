@@ -865,13 +865,18 @@ class ScraperMixin:
             export_data["collections"].append(entry)
         return export_data
 
-    def import_collections_appid_list(self, file_path, data):
+    def import_collections_appid_list(self, file_path, data,
+                                      owned_filter=None):
         """格式一：导入一行一个 AppID 的列表文件，创建一个新收藏夹"""
         file_title = os.path.splitext(os.path.basename(file_path))[0]
         with open(file_path, 'r', encoding='utf-8') as f:
             app_ids = [int(line.strip()) for line in f if line.strip().isdigit()]
         if not app_ids:
             return None, "文件中没有有效的 AppID。"
+        if owned_filter is not None:
+            app_ids = [a for a in app_ids if a in owned_filter]
+            if not app_ids:
+                return None, "筛选后没有已入库的游戏。"
         self.add_static_collection(data, file_title, app_ids)
         return len(app_ids), None
 

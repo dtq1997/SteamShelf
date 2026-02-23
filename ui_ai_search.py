@@ -276,12 +276,16 @@ class AISearchMixin:
             if not name:
                 return
             int_ids = [int(a) for a in matched_ids if a.isdigit()]
-            self._collections_core.add_static_collection(data, name, int_ids)
+            filtered = self._ask_filter_owned(int_ids, parent=win)
+            if filtered is None:
+                return
+            self._collections_core.add_static_collection(
+                data, name, filtered)
             self._save_and_sync(data,
                 backup_description=f"AI 智能筛选创建: {name}")
             self._ui_refresh()
             messagebox.showinfo("✅ 成功",
-                f"已创建收藏夹「{name}」，包含 {len(int_ids)} 款游戏。",
+                f"已创建收藏夹「{name}」，包含 {len(filtered)} 款游戏。",
                 parent=win)
 
         def do_target_update():

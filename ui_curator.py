@@ -208,8 +208,12 @@ class CuratorMixin:
                     "请输入收藏夹名称：",
                     initialvalue=fetched_name.get(), parent=cur_win)
                 if name:
+                    filtered = self._ask_filter_owned(
+                        list(fetched_ids), parent=cur_win)
+                    if filtered is None:
+                        return
                     col_id = self._collections_core.add_static_collection(
-                        data, name, list(fetched_ids))
+                        data, name, filtered)
                     if col_id and mode_combo.get() != "无":
                         mode_map = {"增量": "incremental",
                                     "增量+辅助": "incremental_aux",
@@ -222,7 +226,7 @@ class CuratorMixin:
                         data,
                         backup_description=f"从 Steam 列表创建收藏夹: {name}")
                     messagebox.showinfo("录入成功",
-                        f"已建立新收藏夹。共录入 {len(fetched_ids)} 个 AppID。"
+                        f"已建立新收藏夹。共录入 {len(filtered)} 个 AppID。"
                         + disclaimer, parent=cur_win)
                     cur_win.destroy()
             fetch_and_execute(create_action)

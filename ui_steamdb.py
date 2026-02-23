@@ -126,13 +126,17 @@ class SteamDBMixin:
                                           initialvalue=name_var.get(),
                                           parent=db_win)
             if name:
+                filtered = self._ask_filter_owned(
+                    list(merged_ids), parent=db_win)
+                if filtered is None:
+                    return
                 self._collections_core.add_static_collection(
-                    data, name, list(merged_ids))
+                    data, name, filtered)
                 self._save_and_sync(
                     data, backup_description=f"从 SteamDB 创建收藏夹: {name}")
                 detail = '\n'.join(merge_stats)
                 messagebox.showinfo("录入成功",
-                    f"已建立新收藏夹。本次共录入 {len(merged_ids)} 个 AppID。\n\n"
+                    f"已建立新收藏夹。本次共录入 {len(filtered)} 个 AppID。\n\n"
                     f"各文件明细：\n{detail}" + disclaimer,
                     parent=db_win)
                 db_win.destroy()

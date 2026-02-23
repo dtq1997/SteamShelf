@@ -20,10 +20,22 @@ import shutil
 
 
 class ConfigManager:
-    """统一配置管理：读写 ~/.steam_toolkit/config.json"""
+    """统一配置管理：读写 ~/.steam_toolkit/config.json
+
+    配置拆分为两个文件：
+    - config.json: 设置项（~10KB，启动时同步加载）
+    - cache_games.json: 游戏缓存（~25MB，延迟加载）
+    """
 
     _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".steam_toolkit")
     _CONFIG_FILE = os.path.join(_CONFIG_DIR, "config.json")
+    _CACHE_FILE = os.path.join(_CONFIG_DIR, "cache_games.json")
+
+    # 需要拆分到 cache 文件的键
+    _CACHE_KEYS = frozenset({
+        "game_name_cache", "app_type_cache", "app_detail_cache",
+        "game_name_bulk_cache_ts",
+    })
 
     # 旧版配置路径（用于迁移）
     _OLD_B_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".steam_notes_gen")
@@ -31,7 +43,8 @@ class ConfigManager:
 
     def __init__(self):
         self._migrate_old_configs()
-        self._config = self._load()
+        self._caches_loaded = False
+        self._config = self._load_settings()
 
     # ── 旧配置迁移 ──
 
@@ -81,34 +94,73 @@ class ConfigManager:
 
     # ── 通用读写 ──
 
-    def _load(self) -> dict:
-        """从配置文件加载已保存的设置"""
+    def _load_settings(self) -> dict:
+        """仅加载设置文件（不含缓存，~10KB，<1ms）"""
+        data = self._read_json(self._CONFIG_FILE)
+        # 一次性迁移：旧 config.json 含缓存键 → 拆分到 cache 文件
+        cache_in_settings = {k: data.pop(k) for k in list(data)
+                             if k in self._CACHE_KEYS}
+        if cache_in_settings:
+            if not os.path.exists(self._CACHE_FILE):
+                self._write_json(self._CACHE_FILE, cache_in_settings)
+            self._write_json(self._CONFIG_FILE, data)
+        return data
+
+    def load_caches(self):
+        """延迟加载游戏缓存（~25MB），合并到 _config 字典"""
+        if self._caches_loaded:
+            return
+        self._caches_loaded = True
+        cache = self._read_json(self._CACHE_FILE)
+        if cache:
+            self._config.update(cache)
+
+    def _ensure_caches(self):
+        """确保缓存已加载（供 getter 方法调用）"""
+        if not self._caches_loaded:
+            self.load_caches()
+
+    @staticmethod
+    def _read_json(path) -> dict:
         try:
-            if os.path.exists(self._CONFIG_FILE):
-                with open(self._CONFIG_FILE, 'r', encoding='utf-8') as f:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
                     return json.load(f)
         except (json.JSONDecodeError, IOError, OSError):
             pass
         return {}
 
-    def save(self):
-        """保存当前配置到文件（原子写入：先写临时文件再 rename）"""
-        tmp = self._CONFIG_FILE + ".tmp"
+    @staticmethod
+    def _write_json(path, data):
+        """原子写入 JSON 文件"""
+        tmp = path + ".tmp"
         try:
-            os.makedirs(self._CONFIG_DIR, exist_ok=True)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(self._config, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, self._CONFIG_FILE)
+            os.replace(tmp, path)
         except (IOError, OSError) as e:
-            print(f"[配置] ⚠️ 保存失败: {e}")
-            # 清理孤立的临时文件
+            print(f"[配置] ⚠️ 写入失败 {path}: {e}")
             try:
                 if os.path.exists(tmp):
                     os.remove(tmp)
             except Exception:
                 pass
+
+    def save(self):
+        """保存设置到 config.json（不含缓存，快速）"""
+        settings = {k: v for k, v in self._config.items()
+                    if k not in self._CACHE_KEYS}
+        self._write_json(self._CONFIG_FILE, settings)
+
+    def save_caches(self):
+        """保存缓存到 cache_games.json"""
+        cache = {k: self._config[k] for k in self._CACHE_KEYS
+                 if k in self._config}
+        if cache:
+            self._write_json(self._CACHE_FILE, cache)
 
     def get(self, key: str, default=None):
         """获取配置值"""
@@ -212,39 +264,43 @@ class ConfigManager:
 
     def get_name_cache(self) -> dict:
         """获取持久化的游戏名称缓存"""
+        self._ensure_caches()
         return self._config.get("game_name_cache", {})
 
     def save_name_cache(self, cache: dict):
         """保存游戏名称缓存"""
         self._config["game_name_cache"] = cache
-        self.save()
+        self.save_caches()
 
     def get_type_cache(self) -> dict:
         """获取持久化的游戏类型缓存"""
+        self._ensure_caches()
         return self._config.get("app_type_cache", {})
 
     def save_type_cache(self, cache: dict):
         """保存游戏类型缓存"""
         self._config["app_type_cache"] = cache
-        self.save()
+        self.save_caches()
 
     def get_detail_cache(self) -> dict:
         """获取持久化的游戏详情缓存"""
+        self._ensure_caches()
         return self._config.get("app_detail_cache", {})
 
     def save_detail_cache(self, cache: dict):
         """保存游戏详情缓存"""
         self._config["app_detail_cache"] = cache
-        self.save()
+        self.save_caches()
 
     def get_bulk_cache_timestamp(self) -> float:
         """获取全量名称列表的缓存时间戳"""
+        self._ensure_caches()
         return self._config.get("game_name_bulk_cache_ts", 0)
 
     def set_bulk_cache_timestamp(self, ts: float):
         """设置全量名称列表的缓存时间戳"""
         self._config["game_name_bulk_cache_ts"] = ts
-        self.save()
+        self.save_caches()
 
     # ── 收藏夹相关配置（来自软件A）──
 
