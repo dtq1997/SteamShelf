@@ -384,7 +384,10 @@ def _build_company_tab(app, state):
                     if cslug:
                         state.company_slugs[key] = cslug
 
-            state.rec_win.after(0, update_ui)
+            try:
+                state.rec_win.after(0, update_ui)
+            except Exception:
+                pass
 
         threading.Thread(target=bg_thread(search_thread), daemon=True).start()
 
@@ -547,7 +550,10 @@ def load_igdb_dimension_list(app, state, dim_key=None):
             except tk.TclError:
                 return
 
-        state.rec_win.after(0, update_ui)
+        try:
+            state.rec_win.after(0, update_ui)
+        except Exception:
+            pass
 
     threading.Thread(target=bg_thread(fetch_thread), daemon=True).start()
 
@@ -693,7 +699,10 @@ def force_rescan_igdb(app, state):
                         ctx['progress_bar'].config(
                             mode='indeterminate')
                         ctx['progress_bar'].start(15)
-            state.rec_win.after(0, _up)
+            try:
+                state.rec_win.after(0, _up)
+            except Exception:
+                pass
 
         def show():
             ctx['progress_bar'].config(
@@ -701,7 +710,10 @@ def force_rescan_igdb(app, state):
             ctx['progress_bar'].pack(
                 padx=20, pady=(5, 0), fill="x")
             ctx['detail_label'].pack(padx=20, anchor="w")
-        state.rec_win.after(0, show)
+        try:
+            state.rec_win.after(0, show)
+        except Exception:
+            pass
 
         _, error = app._collections_core.build_igdb_full_cache(
             progress_cb, cancel_flag)
@@ -725,7 +737,10 @@ def force_rescan_igdb(app, state):
                 ctx['status_var'].set("✅ IGDB 数据下载完成！")
                 load_all_igdb_tabs(app, state)
 
-        state.rec_win.after(0, done)
+        try:
+            state.rec_win.after(0, done)
+        except Exception:
+            pass
 
     threading.Thread(target=bg_thread(rebuild_thread),
                      daemon=True).start()

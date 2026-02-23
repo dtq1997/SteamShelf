@@ -187,7 +187,8 @@ def get_game_details_from_steam(app_id: str) -> dict:
     except urllib.error.HTTPError as e:
         if e.code == 429:
             raise
-        pass
+    except (ConnectionError, OSError, TimeoutError):
+        raise
     except Exception:
         pass
     return {}
@@ -357,6 +358,8 @@ def get_game_reviews_from_steam(app_id: str, num_per_lang: int = 10) -> dict:
             if e.code == 429:
                 raise
             continue
+        except (ConnectionError, OSError, TimeoutError):
+            raise
         except Exception:
             continue
 

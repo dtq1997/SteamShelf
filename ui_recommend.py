@@ -193,11 +193,17 @@ class RecommendMixin:
                 fetched_data.clear()
                 total = len(selected)
 
+                def _safe_after(fn):
+                    try:
+                        rec_win.after(0, fn)
+                    except Exception:
+                        pass
+
                 def show_progress():
                     progress_bar.pack(padx=20, pady=(5, 0), fill="x")
                     detail_label.pack(padx=20, anchor="w")
                     progress_bar.start(15)
-                rec_win.after(0, show_progress)
+                _safe_after(show_progress)
 
                 for i, (key, src_type, url_or_id, name) in \
                         enumerate(selected):
@@ -206,7 +212,7 @@ class RecommendMixin:
                             status_var.set(msg)
                             if detail:
                                 detail_var.set(detail)
-                        rec_win.after(0, _up)
+                        _safe_after(_up)
 
                     update_status(
                         f"正在获取 [{i + 1}/{total}]: {name}...")
@@ -274,9 +280,19 @@ class RecommendMixin:
 
                         def igdb_progress_cb(fetched, total_count,
                                              phase, detail):
-                            update_status(
-                                f"正在获取 [{i + 1}/{total}]: "
-                                f"{name} ({phase})", detail)
+                            def _up_igdb():
+                                status_var.set(
+                                    f"正在获取 [{i + 1}/{total}]: "
+                                    f"{name} ({phase})")
+                                if detail:
+                                    detail_var.set(detail)
+                                if total_count > 0:
+                                    progress_bar.stop()
+                                    progress_bar.config(
+                                        mode='determinate',
+                                        maximum=total_count)
+                                    progress_bar['value'] = fetched
+                            _safe_after(_up_igdb)
 
                         ids, error = \
                             self._collections_core.fetch_igdb_games_by_dimension(
@@ -315,9 +331,19 @@ class RecommendMixin:
 
                         def company_progress_cb(fetched, total_count,
                                                 phase, detail):
-                            update_status(
-                                f"正在获取 [{i + 1}/{total}]: "
-                                f"{name} ({phase})", detail)
+                            def _up_co():
+                                status_var.set(
+                                    f"正在获取 [{i + 1}/{total}]: "
+                                    f"{name} ({phase})")
+                                if detail:
+                                    detail_var.set(detail)
+                                if total_count > 0:
+                                    progress_bar.stop()
+                                    progress_bar.config(
+                                        mode='determinate',
+                                        maximum=total_count)
+                                    progress_bar['value'] = fetched
+                            _safe_after(_up_co)
 
                         ids, error = \
                             self._collections_core.fetch_igdb_games_by_company(
@@ -341,6 +367,8 @@ class RecommendMixin:
                 def final_update():
                     is_fetching[0] = False
                     igdb_state.force_refresh[0] = False
+                    if not rec_win.winfo_exists():
+                        return
                     progress_bar.stop()
                     progress_bar.pack_forget()
                     detail_label.pack_forget()
@@ -391,7 +419,7 @@ class RecommendMixin:
                         status_var.set("❌ 所有来源获取失败。")
                         status_label.config(fg="red")
 
-                rec_win.after(0, final_update)
+                _safe_after(final_update)
 
             threading.Thread(target=bg_thread(fetch_thread),
                              daemon=True).start()

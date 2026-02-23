@@ -483,7 +483,7 @@ class ImportExportMixin:
                     if conflicts:
                         self._ui_import_conflict(win, filtered, conflicts)
                     else:
-                        filtered, skipped = self._filter_uploading_apps(filtered)
+                        filtered, skipped = self._filter_uploading_for_import(filtered)
                         if skipped:
                             messagebox.showwarning("⚠️ 跳过上传中",
                                 f"已跳过 {skipped} 个正在上传的游戏。", parent=win)
@@ -524,7 +524,7 @@ class ImportExportMixin:
         ttk.Button(_imp_btn_frame, text="取消", command=win.destroy).pack(side=tk.LEFT, padx=5)
         self._center_window(win)
 
-    def _filter_uploading_apps(self, parsed: dict) -> tuple:
+    def _filter_uploading_for_import(self, parsed: dict) -> tuple:
         """过滤掉正在上传的 app，返回 (filtered_dict, skipped_count)"""
         uploading = [aid for aid in parsed if self.is_app_uploading(aid)]
         if not uploading:
@@ -646,7 +646,7 @@ class ImportExportMixin:
         btn_frame.pack(pady=(15, 15))
 
         def _do_apply(policy):
-            safe, _ = self._filter_uploading_apps(parsed)
+            safe, skipped = self._filter_uploading_for_import(parsed)
             results = self.manager.apply_batch_import(safe, ai_policy=policy)
             cwin.grab_release()
             cwin.destroy()
@@ -759,7 +759,7 @@ class ImportExportMixin:
         def _finish():
             owin.grab_release()
             owin.destroy()
-            safe, _ = self._filter_uploading_apps(parsed)
+            safe, skipped = self._filter_uploading_for_import(parsed)
             results = self.manager.apply_batch_import(
                 safe, ai_policy="append",
                 per_app_policy=per_app_policy)

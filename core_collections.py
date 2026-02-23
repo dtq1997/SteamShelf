@@ -174,6 +174,22 @@ class CollectionsCore(IGDBMixin, ScraperMixin):
         self.queue_cef_upsert(col_id, actual_name, app_ids)
         return col_id
 
+    def update_collection_apps(self, data, col_id, app_ids):
+        """更新已有分类的游戏列表"""
+        storage_key = f"user-collections.{col_id}"
+        for entry in data:
+            if entry[0] == storage_key:
+                val = json.loads(entry[1]["value"])
+                val["added"] = app_ids
+                entry[1]["value"] = json.dumps(
+                    val, ensure_ascii=False, separators=(',', ':'))
+                entry[1]["timestamp"] = int(time.time())
+                entry[1]["version"] = self.next_version(data)
+                self.queue_cef_upsert(
+                    col_id, val.get("name", ""), app_ids)
+                return True
+        return False
+
     # ==================== 来源缓存 ====================
 
     @property

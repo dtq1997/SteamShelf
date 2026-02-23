@@ -52,6 +52,13 @@ class AISearchMixin:
             return
 
         win = tk.Toplevel(self.root)
+
+        def _safe_after(fn):
+            try:
+                win.after(0, fn)
+            except Exception:
+                pass
+
         if target_col:
             win.title(f"🤖 AI 智能筛选更新「{target_col[1]}」")
         else:
@@ -198,7 +205,7 @@ class AISearchMixin:
                     reason_text.insert(tk.END, delta)
                     reason_text.see(tk.END)
                     reason_text.config(state=tk.DISABLED)
-                win.after(0, _append)
+                _safe_after(_append)
 
             def worker():
                 try:
@@ -214,6 +221,8 @@ class AISearchMixin:
                     ids, full_text, error, usage = [], "", str(e), {}
 
                 def on_done():
+                    if not win.winfo_exists():
+                        return
                     progress.stop()
                     progress.pack_forget()
                     search_btn.config(state=tk.NORMAL)
@@ -257,7 +266,7 @@ class AISearchMixin:
                     result_count_var.set(f"共 {len(ids)} 款游戏{token_text}")
                     create_btn.config(state=tk.NORMAL)
 
-                win.after(0, on_done)
+                _safe_after(on_done)
 
             threading.Thread(target=bg_thread(worker), daemon=True).start()
 

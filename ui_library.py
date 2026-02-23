@@ -194,7 +194,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
         # ── 收藏夹筛选状态行（有 +/- 时显示，初始隐藏） ──
         self._coll_filter_status = tk.Text(
-            right, height=1, wrap=tk.WORD, font=("微软雅黑", 8),
+            right, height=1, wrap=tk.WORD, font=("微软雅黑", 12),
             bg=right.cget("bg"), bd=0, highlightthickness=0,
             cursor="arrow", state=tk.DISABLED)
         self._coll_ops_plus = []
@@ -524,14 +524,15 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_status.config(text="🔄 正在从 CEF 获取数据...")
         self._bg_load_cef_data()
 
-    def _bg_load_cef_data(self):
-        """后台加载 CEF 数据（名称缓存 + 收藏夹 + 游戏列表），不阻塞 UI"""
+    def _bg_load_cef_data(self, rebuild=False):
+        """后台加载 CEF 数据（名称缓存 + 收藏夹 + 游戏列表），不阻塞 UI
+
+        Args:
+            rebuild: True 时完成后触发 tree rebuild（手动刷新用）
+        """
         def _work():
             self._lib_enhance_name_cache_from_cef()
-            # 先加载游戏列表（设置 _lib_all_games），再加载收藏夹
-            # 这样收藏夹触发的 expression update rebuild 已有完整游戏列表
             self._lib_load_owned_from_cef()
-            # 后台预取收藏夹数据，避免主线程 CEF 调用
             cef_colls = None
             if self._cef_bridge and self._cef_bridge.is_connected():
                 try:
@@ -545,9 +546,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             def _on_main():
                 self._lib_load_collections(
                     prefetched_cef=cef_colls, skip_expression_update=True)
-                # 不再单独触发 tree rebuild：
-                # 1st rebuild 已用完整 CEF 游戏列表；
-                # _bg_init_game_names 完成后会触发名称更新 rebuild
+                if rebuild:
+                    self._lib_schedule_tree_rebuild()
 
             self.root.after(0, _on_main)
         threading.Thread(target=bg_thread(_work), daemon=True).start()
@@ -1070,7 +1070,10 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         """防抖定时器到期，执行实际 rebuild"""
         self._tree_rebuild_timer = None
         self._tree_rebuild_cache = None
-        self._lib_populate_tree()
+        if getattr(self, '_viewing_collections', False):
+            self._apply_coll_filters()
+        else:
+            self._lib_populate_tree()
 
     def _lib_populate_tree(self, force_rebuild=False):
         """填充统一游戏列表（库数据 + 笔记数据合并）"""
@@ -1389,7 +1392,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_status.config(text="🔄 正在刷新...")
 
         if self._cef_bridge and self._cef_bridge.is_connected():
-            self._bg_load_cef_data()
+            self._bg_load_cef_data(rebuild=True)
         else:
             self._lib_all_games = []
             self._lib_load_initial()

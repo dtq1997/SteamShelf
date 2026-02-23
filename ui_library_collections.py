@@ -134,6 +134,9 @@ class LibraryCollectionsMixin:
         else:
             self._lib_render_collections_local(coll_tree)
 
+        # 表达式分类标签修正（CEF 的 owned/not_owned 拆分对表达式分类无意义）
+        self._refresh_expr_coll_labels()
+
         # 自动更新 expression 类型的绑定分类（后台线程，不阻塞 UI）
         if not skip_expression_update:
             self._schedule_expression_update()
@@ -433,8 +436,10 @@ class LibraryCollectionsMixin:
         perf_log('USER_ACTION', extra='create_collection_menu')
         menu = tk.Menu(self.root, tearoff=0)
         # 有任何活跃筛选时，显示"保存筛选为分类"
-        has_coll_filter = any(
-            s != 'default' for s in self._coll_filter_states.values())
+        active_colls = [
+            cid for cid, s in self._coll_filter_states.items()
+            if s != 'default']
+        has_coll_filter = len(active_colls) > 0
         filters = self._lib_read_filter_state()
         _defaults = {'filter_mode': '全部', 'model_filter': None,
                      'dirty_only': False, 'uploading_only': False,
@@ -443,7 +448,8 @@ class LibraryCollectionsMixin:
         has_game_filter = any(
             filters.get(k) != v for k, v in _defaults.items())
         has_search = bool(self._lib_search_var.get().strip())
-        if has_coll_filter or has_game_filter or has_search:
+        has_any_filter = has_coll_filter or has_game_filter or has_search
+        if has_any_filter:
             menu.add_command(label="📐 将当前筛选保存为分类",
                              command=self._save_filter_as_collection)
             menu.add_separator()
@@ -550,21 +556,31 @@ class LibraryCollectionsMixin:
                     传入时复用避免重复 scan_all。
         """
         coll_cache = getattr(self, '_coll_data_cache', {})
-        if not coll_cache:
-            return []
         states = params.get('coll_filter_states', {})
         plus_ids = [c for c, s in states.items() if s == 'plus']
         minus_ids = [c for c, s in states.items() if s == 'minus']
+        # 仅当引用了分类且缓存为空时才跳过（无分类引用时不需要缓存）
+        if (plus_ids or minus_ids) and not coll_cache:
+            return []
         ops_p = params.get('coll_ops_plus', [True] * max(0, len(plus_ids) - 1))
         ops_m = params.get('coll_ops_minus', [True] * max(0, len(minus_ids) - 1))
 
         plus_o, plus_n = self._eval_coll_expr(plus_ids, ops_p)
         minus_o, minus_n = self._eval_coll_expr(minus_ids, ops_m)
 
+        # 笔记数据（提前加载，candidates 构建也需要）
+        if not self._expr_needs_notes(params):
+            notes_games, ai_map, sync_map = {}, {}, {}
+        elif notes_data:
+            notes_games, ai_map, sync_map = notes_data
+        else:
+            notes_games, ai_map, sync_map = self._lib_load_notes_data()
+
         if plus_ids:
             owned, not_owned = plus_o, plus_n
         else:
-            owned = set(str(g['app_id']) for g in (self._lib_all_games_backup or self._lib_all_games) if g.get('owned'))
+            base = self._lib_all_games_backup or self._lib_all_games
+            owned = set(str(g['app_id']) for g in base if g.get('owned'))
             not_owned = set()
         owned -= minus_o
         not_owned -= minus_n
@@ -583,24 +599,12 @@ class LibraryCollectionsMixin:
         sq = params.get('search_q', '').lower()
         sm = params.get('search_mode', 'name')
 
-        # 类型查找表（O(1) 替代 _guess_type_for_aid 的 O(N) 线性扫描）
+        # 类型查找表
         need_type = type_f and len(type_f) < len(self._ALL_TYPES)
         if need_type:
             type_map = {str(g.get('app_id')): self._get_type_name(
                 g.get('type') or g.get('app_type') or g.get('nAppType') or 1)
                 for g in (self._lib_all_games_backup or self._lib_all_games)}
-
-        # 笔记数据：无笔记筛选时用空 dict（零 I/O），否则复用传入或缓存
-        if not self._expr_needs_notes(params):
-            notes_games, ai_map, sync_map = {}, {}, {}
-        elif notes_data:
-            notes_games, ai_map, sync_map = notes_data
-        else:
-            rc = getattr(self, '_tree_rebuild_cache', None)
-            if rc:
-                notes_games, ai_map, sync_map = rc['notes'], rc['ai'], rc['sync']
-            else:
-                notes_games, ai_map, sync_map = self._lib_load_notes_data()
 
         result = []
         for aid in candidates:
@@ -669,7 +673,7 @@ class LibraryCollectionsMixin:
 
         threading.Thread(target=bg_thread(_bg), daemon=True).start()
 
-    def _auto_update_expression_collections(self):
+    def _auto_update_expression_collections(self, force_fresh=False):
         """自动更新所有 expression 类型的绑定分类（_lib_load_collections 末尾调用）
 
         多轮收敛：表达式可能引用其他表达式，单次遍历顺序不确定，
@@ -678,6 +682,9 @@ class LibraryCollectionsMixin:
         if getattr(self, '_expression_updating', False):
             return
         if not self._collections_core:
+            return
+        # 防止在 _lib_all_games 未加载完时跑出灾难性结果
+        if len(self._lib_all_games) < 100 and not force_fresh:
             return
         all_sources = self._collections_core._get_all_sources()
         expr_sources = {k: v for k, v in all_sources.items()
@@ -689,20 +696,33 @@ class LibraryCollectionsMixin:
         if data is None:
             return
 
-        owned_set = set(
-            str(g['app_id']) for g in
-            (self._lib_all_games_backup or self._lib_all_games)
-            if g.get('owned'))
-
         # 预加载笔记数据（仅当任一表达式需要时），所有表达式共享同一份
         needs_notes = any(
             self._expr_needs_notes(v.get('source_params', {}))
             for v in expr_sources.values())
         if needs_notes:
-            rc = getattr(self, '_tree_rebuild_cache', None)
-            nd = (rc['notes'], rc['ai'], rc['sync']) if rc else self._lib_load_notes_data()
+            if force_fresh:
+                self._invalidate_notes_cache()
+            nd = self._lib_load_notes_data()
         else:
             nd = ({}, {}, {})
+
+        # ── 调试日志 ──
+        import os, datetime
+        _dbg = os.environ.get('STEAMSHELF_DEBUG_EXPR')
+        _log_lines = []
+        def _dbg_log(msg):
+            if _dbg:
+                _log_lines.append(f"[{datetime.datetime.now():%H:%M:%S.%f}] {msg}")
+
+        cache = getattr(self, '_coll_data_cache', {})
+        _dbg_log(f"=== auto_update START: {len(expr_sources)} expr colls, "
+                 f"cache_keys={len(cache)} ===")
+        for cid in expr_sources:
+            c = cache.get(cid, {})
+            _dbg_log(f"  BEFORE {cid}: cache_owned={len(c.get('owned_app_ids',[]))}, "
+                     f"cache_notowned={len(c.get('not_owned_app_ids',[]))}, "
+                     f"name={c.get('name','?')}")
 
         changed = False
         self._expression_updating = True
@@ -712,23 +732,61 @@ class LibraryCollectionsMixin:
                 for col_id, src_info in expr_sources.items():
                     params = src_info.get('source_params', {})
                     new_ids = set(self._eval_filter_expression(params, notes_data=nd))
+                    _dbg_log(f"  pass{_pass} {col_id}: eval→{len(new_ids)} ids, "
+                             f"filters={params.get('filters',{})}, "
+                             f"plus={[c for c,s in params.get('coll_filter_states',{}).items() if s=='plus']}, "
+                             f"minus={[c for c,s in params.get('coll_filter_states',{}).items() if s=='minus']}")
                     if self._apply_expression_update(
-                            data, col_id, new_ids, owned_set):
+                            data, col_id, new_ids):
                         pass_changed = True
                         changed = True
+                        _dbg_log(f"    → CHANGED")
                 if not pass_changed:
+                    _dbg_log(f"  pass{_pass}: stable, break")
                     break
         finally:
             self._expression_updating = False
 
+        for cid in expr_sources:
+            c = cache.get(cid, {})
+            _dbg_log(f"  AFTER {cid}: cache_owned={len(c.get('owned_app_ids',[]))}, "
+                     f"name={c.get('name','?')}")
+        _dbg_log(f"=== auto_update END: changed={changed} ===")
+
+        if _dbg and _log_lines:
+            _p = os.path.join(os.path.expanduser('~'), '.steam_toolkit', 'expr_debug.log')
+            with open(_p, 'a', encoding='utf-8') as f:
+                f.write('\n'.join(_log_lines) + '\n\n')
+
         if changed:
-            # 只写本地 JSON，不触发 CEF 模态同步（启动时弹窗体验差）
-            self._collections_core.pop_pending_cef_ops()  # 丢弃队列
+            self._collections_core.pop_pending_cef_ops()
             self._collections_core.save_json(
                 data, backup_description="自动更新筛选表达式分类")
+            # 直接更新树标签（不调用 _lib_load_collections，避免重建 cache 覆盖）
+            self.root.after(0, self._refresh_expr_coll_labels)
         return changed
 
-    def _apply_expression_update(self, data, col_id, new_ids, owned_set):
+    def _refresh_expr_coll_labels(self):
+        """更新表达式分类的树标签（表达式分类不受 CEF owned 拆分影响，始终用 total）"""
+        if not self._collections_core:
+            return
+        all_sources = self._collections_core._get_all_sources()
+        cache = getattr(self, '_coll_data_cache', {})
+        tree = self._coll_tree
+        for col_id, src in all_sources.items():
+            if src.get('source_type') != 'expression':
+                continue
+            if col_id not in cache or not tree.exists(col_id):
+                continue
+            c = cache[col_id]
+            name = c.get('name', col_id)
+            total = len(c.get('owned_app_ids', [])) + len(c.get('not_owned_app_ids', []))
+            old_text = tree.item(col_id, 'text')
+            icon = old_text.split(' ')[0] if old_text else '🔗'
+            label = f"{icon} {name} ({total})"
+            tree.item(col_id, text=label)
+
+    def _apply_expression_update(self, data, col_id, new_ids):
         """更新单个表达式分类的 JSON 数据 + 缓存，返回是否有变化"""
         for entry in data:
             if entry[0] != f"user-collections.{col_id}":
@@ -738,42 +796,58 @@ class LibraryCollectionsMixin:
                 return False
             val = json.loads(meta['value'])
             old_ids = set(str(a) for a in val.get('added', []))
-            if new_ids == old_ids:
-                return False
-            int_ids = [int(a) for a in new_ids if a.isdigit()]
-            val['added'] = int_ids
-            meta['value'] = json.dumps(
-                val, ensure_ascii=False, separators=(',', ':'))
-            meta['timestamp'] = int(time.time())
-            self._collections_core.queue_cef_upsert(
-                col_id, val.get('name', ''), int_ids)
-            # 同步刷新缓存，让后续表达式看到新数据
+            json_changed = (new_ids != old_ids)
+            if json_changed:
+                int_ids = [int(a) for a in new_ids if a.isdigit()]
+                val['added'] = int_ids
+                meta['value'] = json.dumps(
+                    val, ensure_ascii=False, separators=(',', ':'))
+                meta['timestamp'] = int(time.time())
+                self._collections_core.queue_cef_upsert(
+                    col_id, val.get('name', ''), int_ids)
+            # 始终同步缓存（_lib_load_collections 可能用不同 owned_set 重建过）
             cache = getattr(self, '_coll_data_cache', {})
             if col_id in cache:
+                owned_set = set(
+                    str(g['app_id']) for g in
+                    (self._lib_all_games_backup or self._lib_all_games)
+                    if g.get('owned'))
                 cache[col_id]['owned_app_ids'] = [
                     a for a in new_ids if a in owned_set]
                 cache[col_id]['not_owned_app_ids'] = [
                     a for a in new_ids if a not in owned_set]
-            return True
+            return json_changed
         return False
 
     def _update_expression_upstream(self, col_id, source_info):
-        """对 expression 分类点"更新来源"→ 更新其引用的上游绑定分类"""
-        params = source_info.get('source_params', {})
-        states = params.get('coll_filter_states', {})
-        upstream_ids = set(states.keys())
-        if not upstream_ids:
-            return
-        # 筛选出有自己来源绑定的上游分类
-        all_src = self._collections_core._get_all_sources()
-        linked = {k for k in upstream_ids if k in all_src
-                  and all_src[k].get('source_type') != 'expression'}
-        if linked:
-            self._update_all_cached_sources(col_ids=linked)
-        else:
-            messagebox.showinfo("提示",
-                "该表达式引用的分类均无绑定来源，无需更新。",
-                parent=self.root)
+        """对 expression 分类点"更新来源"→ 更新上游 + 重新求值表达式本身"""
+        try:
+            params = source_info.get('source_params', {})
+            states = params.get('coll_filter_states', {})
+            upstream_ids = set(states.keys())
+            if upstream_ids:
+                all_src = self._collections_core._get_all_sources()
+                linked = {k for k in upstream_ids if k in all_src
+                          and all_src[k].get('source_type') != 'expression'}
+                if linked:
+                    self._update_all_cached_sources(col_ids=linked)
+            changed = self._auto_update_expression_collections(force_fresh=True)
+            cache = getattr(self, '_coll_data_cache', {})
+            name = cache.get(col_id, {}).get('name', col_id)
+            if changed:
+                c = cache.get(col_id, {})
+                cnt = len(c.get('owned_app_ids', [])) + len(c.get('not_owned_app_ids', []))
+                self._refresh_expr_coll_labels()
+                messagebox.showinfo("更新完成",
+                    f"「{name}」已更新，当前 {cnt} 个游戏。",
+                    parent=self.root)
+            else:
+                messagebox.showinfo("已是最新",
+                    f"「{name}」已是最新，无需更新。",
+                    parent=self.root)
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     def _cycle_coll_filter(self, col_id):
         """循环收藏夹筛选状态：default → plus → minus → default"""
@@ -834,8 +908,11 @@ class LibraryCollectionsMixin:
         t.delete("1.0", tk.END)
         # 配置 tag 样式
         t.tag_configure("txt", foreground="#555")
-        t.tag_configure("op", foreground="#1a73e8",
-                         font=("微软雅黑", 8, "bold"))
+        t.tag_configure("op", foreground="#1565c0",
+                         font=("微软雅黑", 12, "bold"),
+                         background="#e3f2fd")
+        t.tag_configure("paren", foreground="#333",
+                         font=("微软雅黑", 10, "bold"))
         cache = getattr(self, '_coll_data_cache', {})
         first = True
         for prefix, ids, ops, grp in [
@@ -877,13 +954,13 @@ class LibraryCollectionsMixin:
         for gi, group in enumerate(groups):
             paren = mixed and len(group) > 1
             if paren:
-                t.insert(tk.END, "(", "txt")
+                t.insert(tk.END, "(", "paren")
             for j, ni in enumerate(group):
                 t.insert(tk.END, names[ni], "txt")
                 if j < len(group) - 1:
                     self._insert_op_tag(t, ni, grp)
             if paren:
-                t.insert(tk.END, ")", "txt")
+                t.insert(tk.END, ")", "paren")
             if gi < len(between):
                 self._insert_op_tag(t, between[gi], grp)
 
@@ -1536,11 +1613,33 @@ class LibraryCollectionsMixin:
             coll_name = coll_data.get('name', col_id) if coll_data else col_id
             target_col = (col_id, coll_name)
 
-            menu.add_command(label="🔄 更新分类", command=self.update_static_collection)
+            menu.add_command(label="🔄 从本地来源更新分类", command=self.update_static_collection)
             if coll_data and col_id.startswith("uc-"):
                 menu.add_command(label="✏️ 重命名",
                     command=lambda cid=col_id, cn=coll_name:
                         self._rename_collection(cid, cn))
+
+            # 绑定来源：从来源更新 + 解绑（放在第一组）
+            if self._collections_core:
+                _si = self._collections_core.get_collection_source(col_id)
+                if _si:
+                    if _si.get('source_type') == 'expression':
+                        menu.add_command(
+                            label=f"🔄 从来源更新「{coll_name}」",
+                            command=lambda cid=col_id, si=_si:
+                                self._update_expression_upstream(cid, si))
+                    else:
+                        _ml = {"incremental_aux": "增量+辅助",
+                               "incremental": "增量", "replace": "替换"}
+                        _m = _ml.get(_si.get('update_mode', ''), '增量+辅助')
+                        menu.add_command(
+                            label=f"🔄 从来源更新「{coll_name}」({_m})",
+                            command=lambda cid=col_id, si=_si:
+                                self._update_from_cached_source(cid, si))
+                    menu.add_command(
+                        label=f"🔗✂️ 解绑来源「{_si.get('source_display_name', '')[:20]}」",
+                        command=lambda cid=col_id, cn=coll_name:
+                            self._unbind_collection_source(cid, cn))
 
             # 从各种来源更新（与创建菜单相同结构）
             menu.add_separator()
@@ -1565,36 +1664,6 @@ class LibraryCollectionsMixin:
             menu.add_command(label="🌐 分享到社区",
                 command=lambda c=sel[0]: self.share_collections_ui(
                     preselected=[c]))
-
-        # 检查选中收藏夹是否有缓存来源
-        if sel and len(sel) == 1 and self._collections_core:
-            col_id = sel[0]
-            source_info = self._collections_core.get_collection_source(col_id)
-            if source_info:
-                coll_data = self._coll_data_cache.get(col_id)
-                coll_name = coll_data['name'] if coll_data else col_id
-                mode_labels = {
-                    "incremental_aux": "增量+辅助",
-                    "incremental": "增量",
-                    "replace": "替换",
-                }
-                mode_label = mode_labels.get(
-                    source_info.get('update_mode', ''), '增量+辅助')
-                menu.add_separator()
-                if source_info.get('source_type') == 'expression':
-                    menu.add_command(
-                        label=f"🔄 更新上游分类「{coll_name}」",
-                        command=lambda cid=col_id, si=source_info:
-                            self._update_expression_upstream(cid, si))
-                else:
-                    menu.add_command(
-                        label=f"🔄 从来源更新「{coll_name}」({mode_label})",
-                        command=lambda cid=col_id, si=source_info:
-                            self._update_from_cached_source(cid, si))
-                menu.add_command(
-                    label=f"🔗✂️ 解绑来源「{source_info.get('source_display_name', '')[:20]}」",
-                    command=lambda cid=col_id, cn=coll_name:
-                        self._unbind_collection_source(cid, cn))
 
         # 多选：更新选中的绑定分类 / 导出
         if sel and len(sel) > 1 and self._collections_core:

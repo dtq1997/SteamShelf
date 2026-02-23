@@ -538,41 +538,56 @@ class InlineAIGenMixin:
         _reviews_ok = False
         try:
             details = get_game_details_from_steam(aid)
-            _details_ok = True  # API 调用成功即可，游戏无商店页不算故障
+            _details_ok = True
             if details:
                 game_context = format_game_context(details)
                 if details.get("name") and name.startswith("AppID"):
                     name = details["name"]
+                self.root.after(0, lambda n=name, l=len(game_context):
+                    self._inline_log(f"📋 {n}: 详情 {l} 字符"))
+            else:
+                self.root.after(0, lambda n=name:
+                    self._inline_log(f"📋 {n}: 详情为空（无商店页？）"))
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 self.root.after(0, lambda n=name:
                     self._inline_log(
                         f"⚠️ {n}: Steam 商店 API 限速，跳过详情"))
-        except Exception:
-            pass
+        except Exception as e:
+            self.root.after(0, lambda n=name, err=e:
+                self._inline_log(f"⚠️ {n}: 获取详情异常: {err}"))
         self.root.after(0, lambda a=aid, n=name:
             self._inline_log(f"💬 获取 {n} 的玩家评测..."))
         try:
             reviews_data = get_game_reviews_from_steam(aid)
-            _reviews_ok = True  # API 调用成功即可，游戏没评测不算故障
+            _reviews_ok = True
             if reviews_data:
                 review_ctx = format_review_context(reviews_data)
+                n_rev = len(reviews_data.get('reviews', []))
                 if review_ctx:
                     game_context = ((game_context + "\n\n" + review_ctx)
                                     if game_context else review_ctx)
+                self.root.after(0, lambda n=name, nr=n_rev, l=len(review_ctx or ''):
+                    self._inline_log(f"💬 {n}: {nr} 条评测, {l} 字符"))
+            else:
+                self.root.after(0, lambda n=name:
+                    self._inline_log(f"💬 {n}: 评测为空"))
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 self.root.after(0, lambda n=name:
                     self._inline_log(
                         f"⚠️ {n}: Steam 评测 API 限速，跳过评测"))
-        except Exception:
-            pass
+        except Exception as e:
+            self.root.after(0, lambda n=name, err=e:
+                self._inline_log(f"⚠️ {n}: 获取评测异常: {err}"))
         # 分别标注商店详情和评测的故障状态
         steam_warns = []
         if not _details_ok:
             steam_warns.append(WARN_STEAM_UNAVAIL)
         if not _reviews_ok:
             steam_warns.append(WARN_STEAM_REVIEW_UNAVAIL)
+        self.root.after(0, lambda n=name, l=len(game_context):
+            self._inline_log(f"📊 {n}: 总上下文 {l} 字符"))
         return game_context, name, steam_warns
 
     # ────────────────────── 单游戏生成+保存 ──────────────────────

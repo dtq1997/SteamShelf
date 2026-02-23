@@ -31,6 +31,13 @@ class CuratorMixin:
         if data is None:
             return
         cur_win = tk.Toplevel(self.root)
+
+        def _safe_after(fn):
+            try:
+                cur_win.after(0, fn)
+            except Exception:
+                pass
+
         if target_col:
             cur_win.title(f"从 Steam 列表更新「{target_col[1]}」")
         else:
@@ -151,7 +158,7 @@ class CuratorMixin:
                         f"正在获取: 已发现 {fetched} 个游戏{phase_str}...")
                     if detail_info:
                         detail_var.set(detail_info)
-                cur_win.after(0, _up)
+                _safe_after(_up)
 
             def fetch_thread():
                 nonlocal fetched_ids
@@ -159,7 +166,7 @@ class CuratorMixin:
                     progress_bar.pack(padx=20, pady=(4, 0), fill="x")
                     detail_label.pack(padx=20, anchor="w")
                     progress_bar.start(15)
-                cur_win.after(0, show_progress)
+                _safe_after(show_progress)
 
                 ids, name, error, has_login = \
                     self._collections_core.fetch_steam_list(
@@ -168,6 +175,8 @@ class CuratorMixin:
 
                 def finish():
                     is_fetching[0] = False
+                    if not cur_win.winfo_exists():
+                        return
                     for btn in btn_widgets:
                         btn.config(state="normal")
                     progress_bar.stop()
@@ -192,7 +201,7 @@ class CuratorMixin:
                     status_label.config(fg="green")
                     action_callback()
 
-                cur_win.after(0, finish)
+                _safe_after(finish)
 
             threading.Thread(target=bg_thread(fetch_thread), daemon=True).start()
 
@@ -313,14 +322,14 @@ class CuratorMixin:
                         f"正在获取: 已发现 {fetched} 个游戏{phase_str}...")
                     if detail_info:
                         detail_var.set(detail_info)
-                cur_win.after(0, _up)
+                _safe_after(_up)
 
             def fetch_and_update_thread():
                 def show_progress():
                     progress_bar.pack(padx=20, pady=(4, 0), fill="x")
                     detail_label.pack(padx=20, anchor="w")
                     progress_bar.start(15)
-                cur_win.after(0, show_progress)
+                _safe_after(show_progress)
 
                 ids, name, error, has_login = \
                     self._collections_core.fetch_steam_list(
@@ -400,7 +409,7 @@ class CuratorMixin:
                             fetched_name.get() or col_name,
                             update_mode=mode_key)
 
-                cur_win.after(0, finish)
+                _safe_after(finish)
 
             threading.Thread(target=bg_thread(fetch_and_update_thread),
                              daemon=True).start()

@@ -153,9 +153,15 @@ class SharingMixin:
         def _upload():
             try:
                 _supabase_post("shared_collections", payload)
-                win.after(0, lambda: self._on_share_done(win, True))
+                try:
+                    win.after(0, lambda: self._on_share_done(win, True))
+                except Exception:
+                    pass
             except Exception as e:
-                win.after(0, lambda: self._on_share_done(win, False, str(e)))
+                try:
+                    win.after(0, lambda: self._on_share_done(win, False, str(e)))
+                except Exception:
+                    pass
 
         threading.Thread(target=bg_thread(_upload), daemon=True).start()
 
@@ -264,10 +270,16 @@ class SharingMixin:
                     "select=id,friend_code,persona_name,title,description,"
                     "collection_count,game_count,created_at"
                     "&order=created_at.desc&limit=50")
-                win.after(0, lambda: self._populate_browse_tree(
-                    tree, status_var, rows))
+                try:
+                    win.after(0, lambda: self._populate_browse_tree(
+                        tree, status_var, rows))
+                except Exception:
+                    pass
             except Exception as e:
-                win.after(0, lambda: status_var.set(f"加载失败: {e}"))
+                try:
+                    win.after(0, lambda: status_var.set(f"加载失败: {e}"))
+                except Exception:
+                    pass
 
         status_var.set("正在加载...")
         threading.Thread(target=bg_thread(_fetch), daemon=True).start()
@@ -311,10 +323,16 @@ class SharingMixin:
                     "shared_collections", f"id=eq.{rid}&limit=1")
                 if full:
                     self._browse_data_cache[rid] = full[0]
-                    tree.after(0, lambda: self._show_share_detail(full[0]))
+                    try:
+                        tree.after(0, lambda: self._show_share_detail(full[0]))
+                    except Exception:
+                        pass
             except Exception as e:
-                tree.after(0, lambda: self._browse_detail_label.config(
-                    text=f"加载失败: {e}"))
+                try:
+                    tree.after(0, lambda: self._browse_detail_label.config(
+                        text=f"加载失败: {e}"))
+                except Exception:
+                    pass
 
         threading.Thread(target=bg_thread(_fetch_detail), daemon=True).start()
 

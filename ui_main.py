@@ -268,7 +268,7 @@ class SteamToolboxMain(
         self._cef_collections_cache = None
         self._lib_load_collections(force_local=True)
         if any(v in ('plus', 'minus') for v in self._coll_filter_states.values()):
-            self._lib_populate_tree(force_rebuild=True)
+            self._apply_coll_filters()
         perf_log('_ui_refresh', extra='DONE')
 
     def _ui_get_selected(self):
@@ -746,7 +746,9 @@ class SteamToolboxMain(
         need = [aid for aid in all_unowned
                 if aid not in self._app_detail_cache]
         if not need:
+            print(f"[库管理] 未入库详情: 全部已缓存 ({len(all_unowned)} 个)")
             return
+        print(f"[库管理] 未入库详情: 需获取 {len(need)}/{len(all_unowned)} 个 (5线程并发)")
         self._resolve_thread_running = True
         self._resolve_progress = (0, len(need))
         threading.Thread(target=self._resolve_worker,
@@ -806,6 +808,7 @@ class SteamToolboxMain(
                     if persist % 200 == 0:
                         self._persist_all_caches()
         self._persist_all_caches()
+        print(f"[库管理] 后台详情获取完成: {done}/{total}")
         self._resolve_thread_running = False
         try:
             self.root.after(0, self._lib_schedule_tree_rebuild)
@@ -867,7 +870,10 @@ class SteamToolboxMain(
         elif not self._game_name_cache_loaded:
             self._ensure_game_name_cache_fast()
         self._tree_rebuild_cache = None
-        self._lib_populate_tree()
+        if getattr(self, '_viewing_collections', False):
+            self._apply_coll_filters()
+        else:
+            self._lib_populate_tree()
 
     def _force_refresh_games_list(self):
         """刷新按钮：强制重建游戏名称缓存"""

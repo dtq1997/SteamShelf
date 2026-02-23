@@ -85,7 +85,7 @@ class LibrarySourceUpdateMixin:
                     break
 
         if not tasks:
-            messagebox.showinfo("提示", "所有绑定来源的分类均已被删除。",
+            messagebox.showinfo("提示", "没有需要更新的来源。",
                                 parent=self.root)
             return
 
@@ -98,8 +98,14 @@ class LibrarySourceUpdateMixin:
             results = []
             disclaimer = self._collections_core.disclaimer
 
+            # 表达式分类单独处理（用已验证的 _auto_update_expression_collections）
+            expr_ids = [col_id for col_id, si, _, _ in tasks
+                        if si.get('source_type') == 'expression']
+            non_expr_tasks = [(cid, si, e, n) for cid, si, e, n in tasks
+                              if si.get('source_type') != 'expression']
+
             for idx, (col_id, source_info, target_entry, name) in \
-                    enumerate(tasks):
+                    enumerate(non_expr_tasks):
                 src_type = source_info.get('source_type', '')
                 src_params = source_info.get('source_params', {})
                 update_mode = source_info.get('update_mode',
@@ -109,7 +115,10 @@ class LibrarySourceUpdateMixin:
                 def _up_status(n=name, i=idx):
                     pw.update(value=i,
                               status=f"[{i + 1}/{len(tasks)}] 正在更新「{n}」...")
-                pw.win.after(0, _up_status)
+                try:
+                    pw.win.after(0, _up_status)
+                except Exception:
+                    pass
 
                 def progress_cb(fetched, total, phase, detail):
                     pw.update(detail=phase or detail or "")
@@ -119,6 +128,7 @@ class LibrarySourceUpdateMixin:
 
                 if error or not ids:
                     results.append(f"❌ {name}: {error or '无数据'}")
+                    time.sleep(0.3)
                     continue
 
                 if update_mode == 'replace':
@@ -146,10 +156,42 @@ class LibrarySourceUpdateMixin:
 
                 time.sleep(0.3)
 
+            # 表达式分类用已验证的自动更新路径
+            if expr_ids:
+                # auto_update 内部会 pop_pending_cef_ops，先保存非表达式的
+                _saved_cef = (self._collections_core.pop_pending_cef_ops()
+                              if non_expr_tasks else [])
+                if non_expr_tasks:
+                    self._collections_core.save_json(
+                        data, backup_description="批量更新外部来源")
+                try:
+                    pw.update(status="正在更新筛选表达式分类...")
+                except Exception:
+                    pass
+                changed = self._auto_update_expression_collections()
+                if changed:
+                    results.append(
+                        f"🔄 {len(expr_ids)} 个筛选表达式分类已更新")
+                else:
+                    results.append(
+                        f"⏭️ {len(expr_ids)} 个筛选表达式分类已是最新")
+                # 恢复非表达式 CEF ops 供 finish() 同步
+                if _saved_cef:
+                    self._collections_core._pending_cef_ops.extend(
+                        _saved_cef)
+
             def finish():
                 pw.update(value=len(tasks))
-                self._save_and_sync(
-                    data, backup_description="批量更新所有来源")
+                if non_expr_tasks:
+                    if not expr_ids:
+                        self._save_and_sync(
+                            data, backup_description="批量更新所有来源")
+                    else:
+                        # 数据已保存，只需同步恢复的 CEF ops
+                        cef_ops = self._collections_core.pop_pending_cef_ops()
+                        if (cef_ops and self._cef_bridge
+                                and self._cef_bridge.is_connected()):
+                            self._do_cef_sync(cef_ops)
                 pw.close()
                 self._ui_refresh()
 
@@ -228,12 +270,17 @@ class LibrarySourceUpdateMixin:
                     status_var.set(f"正在获取: {phase}")
                     if detail:
                         detail_var.set(detail)
-                prog_win.after(0, _up)
+                try:
+                    prog_win.after(0, _up)
+                except Exception:
+                    pass
 
             ids, error = self._fetch_source_ids(
                 src_type, src_params, progress_cb)
 
             def finish():
+                if not prog_win.winfo_exists():
+                    return
                 progress_bar.stop()
                 if error or not ids:
                     prog_win.destroy()
@@ -273,7 +320,10 @@ class LibrarySourceUpdateMixin:
                 messagebox.showinfo("更新完成",
                     result_msg + disclaimer, parent=self.root)
 
-            prog_win.after(0, finish)
+            try:
+                prog_win.after(0, finish)
+            except Exception:
+                pass
 
         threading.Thread(target=bg_thread(fetch_thread), daemon=True).start()
 
