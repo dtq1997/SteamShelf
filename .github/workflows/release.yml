@@ -67,18 +67,18 @@ jobs:
           REPO="${{ github.repository }}"
           TAG="${GITHUB_REF_NAME}"
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
-          # 从 annotated tag 提取 changelog，没有则留空
+          M1="https://gh-proxy.com/${BASE}"
+          M2="https://ghfast.top/${BASE}"
           CHANGELOG=$(git tag -l --format='%(contents:body)' "$TAG" | head -50)
-          # 转义 JSON 特殊字符
           CHANGELOG_JSON=$(echo "$CHANGELOG" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")
           cat > artifacts/version.json << ENDJSON
           {
             "version": "${VER}",
             "changelog": ${CHANGELOG_JSON},
             "download_urls": {
-              "win32":  ["${BASE}/SteamShelf_win.zip"],
-              "darwin": ["${BASE}/SteamShelf_mac.zip"],
-              "source": ["${BASE}/SteamShelf_source.zip"]
+              "win32":  ["${M1}/SteamShelf_win.zip","${M2}/SteamShelf_win.zip","${BASE}/SteamShelf_win.zip"],
+              "darwin": ["${M1}/SteamShelf_mac.zip","${M2}/SteamShelf_mac.zip","${BASE}/SteamShelf_mac.zip"],
+              "source": ["${M1}/SteamShelf_source.zip","${M2}/SteamShelf_source.zip","${BASE}/SteamShelf_source.zip"]
             }
           }
           ENDJSON
