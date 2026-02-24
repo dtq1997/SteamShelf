@@ -135,27 +135,27 @@ SteamShelf 首次连接时会自动引导完成此步骤。
 ## 技术架构
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  UI 层 (tkinter)                │
-│  SteamToolboxMain = 13 个 Mixin 多继承组合       │
-│  LibraryMixin | CloudMixin | CuratorMixin | ... │
-└──────────────────────┬──────────────────────────┘
-                       │
-┌──────────────────────┴──────────────────────────┐
-│                   数据层                         │
-│  core_collections.py  — 收藏夹读写 + CEF 队列    │
-│  core_notes.py        — 笔记管理 + 脏状态追踪    │
-│  ai_generator.py      — 多模型 AI 生成           │
-│  config_manager.py    — 统一配置 + 缓存持久化     │
-└──────────────────────┬──────────────────────────┘
-                       │
-┌──────────────────────┴──────────────────────────┐
-│                  基础设施层                       │
-│  cef_bridge.py       — CEF WebSocket 桥接        │
-│  cloud_uploader.py   — Steamworks 子进程隔离      │
-│  account_manager.py  — Steam 账号扫描与识别       │
-│  utils.py            — HTTP / 排序 / 公共工具     │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                   UI 层 (tkinter)                   │
+│  SteamToolboxMain = 13 个 Mixin 多继承组合          │
+│  LibraryMixin | CloudMixin | CuratorMixin | ...     │
+└──────────────────────────┬──────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────┐
+│                       数据层                        │
+│  core_collections.py  — 收藏夹读写 + CEF 队列      │
+│  core_notes.py        — 笔记管理 + 脏状态追踪      │
+│  ai_generator.py      — 多模型 AI 生成             │
+│  config_manager.py    — 统一配置 + 缓存持久化      │
+└──────────────────────────┬──────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────┐
+│                     基础设施层                      │
+│  cef_bridge.py       — CEF WebSocket 桥接          │
+│  cloud_uploader.py   — Steamworks 子进程隔离       │
+│  account_manager.py  — Steam 账号扫描与识别        │
+│  utils.py            — HTTP / 排序 / 公共工具      │
+└─────────────────────────────────────────────────────┘
 ```
 
 - **跨平台**：Windows / macOS / Linux
