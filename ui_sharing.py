@@ -823,7 +823,7 @@ class SharingMixin:
     # ── 后台同步（启动时调用） ──
 
     def _sync_published_shares_bg(self: SharingHost):
-        """分享者：检测本地分类变动 → 自动 PATCH 到 Supabase"""
+        """分享者：检测本地分类变动 → 自动 PATCH 到 Supabase（带 UI 反馈）"""
         if not self._ensure_collections_core():
             return
         cache = getattr(self, '_coll_data_cache', {})
@@ -834,21 +834,50 @@ class SharingMixin:
         if not published:
             return
 
+        # 先在主线程检测是否有变动（纯内存操作，不阻塞）
+        pending = []
+        for share_id in list(published):
+            result = engine.build_updated_payload(share_id, cache)
+            if result is not None:
+                pending.append((share_id, result))
+        if not pending:
+            return  # 无变动，静默退出
+
+        label = getattr(self, '_sharing_sync_label', None)
+
+        def _show(text):
+            if not label:
+                return
+            try:
+                def _ui():
+                    if text:
+                        label.config(text=text)
+                        label.pack(side=tk.LEFT, padx=(2, 4))
+                    else:
+                        label.pack_forget()
+                self.root.after(0, _ui)
+            except Exception:
+                pass
+
+        _show(f"☁️ 同步社区分享 0/{len(pending)}...")
+
         def _sync():
             synced = 0
-            for share_id in list(published):
-                result = engine.build_updated_payload(share_id, cache)
-                if result is None:
-                    continue
-                payload, new_hash = result
+            for i, (share_id, (payload, new_hash)) in enumerate(pending):
+                _show(f"☁️ 同步社区分享 {i+1}/{len(pending)}...")
                 if engine.upload_share_update(share_id, payload, new_hash):
                     synced += 1
             if synced:
                 try:
-                    self.root.after(0, lambda: self._collections_core.save_config())
+                    self.root.after(0,
+                                    lambda: self._collections_core.save_config())
                 except Exception:
                     pass
+                _show(f"☁️ 已同步 {synced} 个分享")
                 print(f"[sharing-sync] uploaded {synced} share(s)")
+                import time as _t
+                _t.sleep(3)
+            _show("")  # 清除状态
 
         threading.Thread(target=bg_thread(_sync), daemon=True).start()
 

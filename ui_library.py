@@ -338,6 +338,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
         self._lib_tree.tag_configure("not_owned", background="#e0e0e0")
         self._lib_tree.tag_configure("dirty", foreground="#b8860b", background="#fffff0")
         self._lib_tree.tag_configure("uploading", foreground="#2e7d32", background="#e8f5e9")
+        self._lib_tree.tag_configure("downloading", foreground="#1565c0", background="#e3f2fd")
         self._lib_tree.tag_configure("ai", foreground="#1a73e8")
         self._lib_tree.tag_configure("insufficient", foreground="#cc3333", background="#fff5f5")
         self._lib_tree.tag_configure("normal", foreground="#333")
@@ -976,13 +977,20 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
     def _lib_insert_game_row(self, tree, aid, g, name, is_owned, has_ai,
                               is_dirty, is_uploading, ai_notes_map,
                               notes_col, source_col, note_count, filter_mode,
-                              latest_ts=0):
+                              latest_ts=0, is_downloading=False):
         """插入一行游戏到树视图（含子笔记节点），返回 enriched 游戏字典"""
         app_type = self._get_app_type(g)
         type_str = self._get_type_name(app_type)
 
-        # 改动/上传标记
-        dirty_tag = " ☁️⬆" if is_uploading else (" ⬆" if is_dirty else "")
+        # 改动/上传/下载标记
+        if is_uploading:
+            dirty_tag = " ☁️⬆"
+        elif is_downloading:
+            dirty_tag = " ☁️⬇"
+        elif is_dirty:
+            dirty_tag = " ⬆"
+        else:
+            dirty_tag = ""
         display_name = f"{name}{dirty_tag}"
 
         # 行标签
@@ -990,6 +998,8 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             tag = "not_owned"
         elif is_uploading:
             tag = "uploading"
+        elif is_downloading:
+            tag = "downloading"
         elif is_dirty:
             tag = "dirty"
         elif has_ai and ai_notes_map.get(aid, {}).get('has_insufficient', False):
@@ -1040,6 +1050,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             'game_name': name,
             'is_dirty': is_dirty,
             'is_uploading': is_uploading,
+            'is_downloading': is_downloading,
             'note_count': note_count,
         })
         return g_copy
@@ -1148,10 +1159,10 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
                         'type': 1,
                     })
 
-            # 已删除但仍在云同步中的游戏（syncstate=3，文件已删除）
+            # 云同步中但不在库中的游戏（syncstate=2下载/3上传）
             all_merged_aids = all_aids_in_lib | set(notes_games.keys())
             for aid, state in syncstate_map.items():
-                if state == 3 and aid not in all_merged_aids:
+                if state in (2, 3) and aid not in all_merged_aids:
                     merged_games.append({
                         'app_id': aid,
                         'name': self._get_game_name(aid),
@@ -1181,8 +1192,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             has_notes = aid in notes_games
             note_count = notes_games[aid]['note_count'] if has_notes else 0
             has_ai = aid in ai_notes_map
-            is_dirty = self.manager.is_dirty(aid) if self.manager and has_notes else False
             is_uploading = syncstate_map.get(aid) == 3
+            is_downloading = syncstate_map.get(aid) == 2
+            is_dirty = (self.manager.is_dirty(aid)
+                        if self.manager and has_notes and not is_downloading
+                        else False)
 
             # ── 筛选 + 搜索 ──
             if not self._lib_should_include_game(
@@ -1198,7 +1212,7 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             g_copy = self._lib_insert_game_row(
                 tree, aid, g, name, is_owned, has_ai, is_dirty, is_uploading,
                 ai_notes_map, notes_col, source_col, note_count, filter_mode,
-                latest_ts)
+                latest_ts, is_downloading=is_downloading)
 
             filtered_games.append(g_copy)
             count += 1
@@ -1264,8 +1278,11 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
             has_notes = aid in notes_games
             note_count = notes_games[aid]['note_count'] if has_notes else 0
             has_ai = aid in ai_notes_map
-            is_dirty = self.manager.is_dirty(aid) if self.manager and has_notes else False
             is_uploading = syncstate_map.get(aid) == 3
+            is_downloading = syncstate_map.get(aid) == 2
+            is_dirty = (self.manager.is_dirty(aid)
+                        if self.manager and has_notes and not is_downloading
+                        else False)
 
             if not self._lib_should_include_game(
                     aid, has_ai, is_dirty, is_uploading,

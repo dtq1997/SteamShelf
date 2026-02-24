@@ -431,6 +431,21 @@ class SteamNotesManager:
         """根据持久化的上传哈希与本地文件对比，重建 dirty 状态"""
         if not os.path.exists(self.notes_dir):
             return
+        # 新电脑校准：_uploaded_hashes 为空但有笔记文件时，
+        # 用 remotecache.vdf 的 syncstate=1 自动标记已同步文件
+        if not self._uploaded_hashes:
+            from vdf_parser import parse_remotecache_syncstates
+            syncstates = parse_remotecache_syncstates(self.notes_dir)
+            for aid, state in syncstates.items():
+                if state == 1:  # 已同步
+                    fp = os.path.join(self.notes_dir, f"notes_{aid}")
+                    if os.path.isfile(fp):
+                        h = self._compute_file_hash(fp)
+                        if h:
+                            self._uploaded_hashes[aid] = h
+            if self._uploaded_hashes:
+                print(f"[notes] 新电脑校准: {len(self._uploaded_hashes)} "
+                      f"个笔记已通过 remotecache.vdf 标记为已同步")
         for f in os.listdir(self.notes_dir):
             fp = os.path.join(self.notes_dir, f)
             if not os.path.isfile(fp) or not f.startswith("notes_"):

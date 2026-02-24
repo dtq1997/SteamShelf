@@ -383,6 +383,11 @@ class SteamToolboxMain(
             bg="#4a90d9", fg="#aac8ee")
         self._cloud_upload_label.pack(side=tk.LEFT, padx=(2, 6))
 
+        # 社区分享同步状态
+        self._sharing_sync_label = tk.Label(
+            acc_frame, text="", font=("", 8),
+            bg="#4a90d9", fg="#aac8ee")
+
         def switch_account():
             root.destroy()
             self.intro_callback()

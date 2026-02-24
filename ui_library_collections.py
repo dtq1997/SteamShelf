@@ -137,6 +137,9 @@ class LibraryCollectionsMixin(LibraryExpressionMixin):
         if not skip_expression_update:
             self._schedule_expression_update()
 
+        # 分享者同步：收藏夹变动后检测并上传（debounce 3s）
+        self._schedule_sharing_sync()
+
     def _lib_render_collections_cef(self, coll_tree, cef_collections: dict):
         """使用 CEF 实时数据渲染收藏夹列表
 
@@ -240,11 +243,14 @@ class LibraryCollectionsMixin(LibraryExpressionMixin):
         # 启动后台获取所有未入库游戏信息（Store API 补充）
         self._bg_resolve_all_unowned_types()
 
-        # 分享者同步：首次加载收藏夹后检测变动并上传（一次性）
-        if not getattr(self, '_sharer_sync_triggered', False):
-            self._sharer_sync_triggered = True
-            self.root.after(2000, self._sync_published_shares_bg)
 
+    def _schedule_sharing_sync(self):
+        """Debounce 分享者同步：取消上次计时器，3s 后触发"""
+        timer = getattr(self, '_sharing_sync_timer', None)
+        if timer is not None:
+            self.root.after_cancel(timer)
+        self._sharing_sync_timer = self.root.after(
+            3000, self._sync_published_shares_bg)
 
     def _lib_render_collections_local(self, coll_tree):
         """使用本地 JSON 渲染收藏夹列表（CEF 未连接时的回退方案）"""
