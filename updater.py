@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.10.2"
+__version__ = "5.10.3"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -181,34 +181,54 @@ def _build_update_bat(pid, zip_ps, tmp_dir_ps, app_dir, exe_path, err_log):
 
     策略：taskkill 强杀 → 等进程退出 → 解压到临时目录 → xcopy 覆盖 → 清理
     解决 Expand-Archive 直接覆盖时 .pyd 文件被锁的问题。
+    每步写调试日志到 %TEMP%\\SteamShelf_update_debug.txt。
     """
+    dbg = os.path.join(tempfile.gettempdir(),
+                       "SteamShelf_update_debug.txt").replace("/", "\\")
     return (
         '@echo off\r\n'
+        f'echo [%date% %time%] update.bat started >> "{dbg}"\r\n'
+        f'echo PID={pid} zip={zip_ps} >> "{dbg}"\r\n'
+        f'echo app_dir={app_dir} >> "{dbg}"\r\n'
+        f'echo exe_path={exe_path} >> "{dbg}"\r\n'
+        f'echo [%date% %time%] taskkill /F /PID {pid} >> "{dbg}"\r\n'
         f'taskkill /F /PID {pid} >nul 2>&1\r\n'
+        f'echo [%date% %time%] waiting 5s >> "{dbg}"\r\n'
         'timeout /t 5 /nobreak >nul\r\n'
+        f'echo [%date% %time%] cleanup old tmp_dir >> "{dbg}"\r\n'
         f'if exist "{tmp_dir_ps}" rd /s /q "{tmp_dir_ps}" >nul 2>&1\r\n'
+        f'echo [%date% %time%] Expand-Archive start >> "{dbg}"\r\n'
         f'powershell -NoProfile -Command "'
         f"Expand-Archive -Force '{zip_ps}' '{tmp_dir_ps}'"
         f'"\r\n'
+        f'echo [%date% %time%] Expand-Archive errorlevel=%errorlevel% >> "{dbg}"\r\n'
         'if %errorlevel% neq 0 (\r\n'
         f'  echo [SteamShelf] 解压到临时目录失败。> "{err_log}"\r\n'
         f'  echo 可能原因：安全软件拦截或磁盘空间不足。>> "{err_log}"\r\n'
+        f'  echo [%date% %time%] FAIL: extract >> "{dbg}"\r\n'
         f'  start notepad "{err_log}"\r\n'
         f'  start "" "{exe_path}"\r\n'
         '  del "%~f0"\r\n'
         '  exit /b 1\r\n'
         ')\r\n'
+        f'echo [%date% %time%] xcopy start >> "{dbg}"\r\n'
         f'xcopy "{tmp_dir_ps}\\*" "{app_dir}\\" /E /Y /R /Q >nul 2>&1\r\n'
+        f'echo [%date% %time%] xcopy errorlevel=%errorlevel% >> "{dbg}"\r\n'
         'if %errorlevel% neq 0 (\r\n'
         f'  echo [SteamShelf] 复制文件失败，文件可能仍被占用。> "{err_log}"\r\n'
         f'  echo 请手动关闭所有 SteamShelf 进程后重试。>> "{err_log}"\r\n'
+        f'  echo [%date% %time%] FAIL: xcopy >> "{dbg}"\r\n'
         f'  start notepad "{err_log}"\r\n'
         f'  start "" "{exe_path}"\r\n'
         '  del "%~f0"\r\n'
         '  exit /b 1\r\n'
         ')\r\n'
+        f'echo [%date% %time%] cleanup tmp_dir >> "{dbg}"\r\n'
         f'rd /s /q "{tmp_dir_ps}" >nul 2>&1\r\n'
+        f'echo [%date% %time%] starting exe >> "{dbg}"\r\n'
         f'start "" "{exe_path}"\r\n'
+        f'echo [%date% %time%] SUCCESS, deleting bat >> "{dbg}"\r\n'
+        f'start notepad "{dbg}"\r\n'
         'del "%~f0"\r\n'
     )
 
@@ -222,23 +242,53 @@ def apply_update_and_restart(zip_path, app_dir=None):
         app_dir = get_app_dir()
 
     if sys.platform == "win32" and getattr(sys, 'frozen', False):
+        import time as _time
         exe_path = sys.executable
         pid = os.getpid()
         bat_path = os.path.join(app_dir, "_update.bat")
         tmp_dir = os.path.join(tempfile.gettempdir(), "SteamShelf_update_tmp")
         err_log = os.path.join(tempfile.gettempdir(),
                                "SteamShelf_update_err.txt")
+        dbg_path = os.path.join(tempfile.gettempdir(),
+                                "SteamShelf_update_debug.txt")
+
+        # Python 侧调试日志（bat 会 append 到同一文件）
+        def _dbg(msg):
+            try:
+                with open(dbg_path, "a", encoding="utf-8") as _f:
+                    _f.write(f"[PY {_time.strftime('%H:%M:%S')}] {msg}\n")
+            except Exception:
+                pass
+
+        _dbg(f"apply_update_and_restart START")
+        _dbg(f"  zip_path={zip_path}")
+        _dbg(f"  app_dir={app_dir}")
+        _dbg(f"  exe_path={exe_path}")
+        _dbg(f"  pid={pid}")
+        _dbg(f"  bat_path={bat_path}")
+
         # 转义 PowerShell 单引号
         zp = zip_path.replace("'", "''")
         td = tmp_dir.replace("'", "''")
         bat_content = _build_update_bat(
             pid, zp, td, app_dir, exe_path, err_log)
+
+        _dbg(f"writing bat ({len(bat_content)} bytes)")
         with open(bat_path, "w", encoding="gbk", newline='') as f:
             f.write(bat_content)
-        subprocess.Popen(
+        _dbg(f"bat written OK, exists={os.path.exists(bat_path)}")
+
+        _dbg("launching subprocess.Popen cmd /c ...")
+        proc = subprocess.Popen(
             ["cmd", "/c", bat_path],
             creationflags=subprocess.CREATE_NO_WINDOW)
-        os._exit(0)  # 硬退出，避免 sys.exit 被 tkinter 拦截
+        _dbg(f"Popen OK, child pid={proc.pid}")
+
+        # 等待 1 秒确保子进程已启动
+        _dbg("sleeping 1s before os._exit(0)")
+        _time.sleep(1)
+        _dbg("calling os._exit(0)")
+        os._exit(0)
     else:
         # 非 Windows 或源码运行：返回 zip 路径让 UI 层提示手动替换
         return zip_path
