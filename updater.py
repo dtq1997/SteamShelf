@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.10.4"
+__version__ = "5.10.5"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -179,58 +179,92 @@ def _mirror_label(url: str) -> str:
 def _build_update_bat(pid, zip_ps, tmp_dir_ps, app_dir, exe_path, err_log):
     """生成健壮的更新批处理脚本
 
-    策略：taskkill 强杀 → 等进程退出 → 解压到临时目录 → xcopy 覆盖 → 清理
-    解决 Expand-Archive 直接覆盖时 .pyd 文件被锁的问题。
+    策略：taskkill 强杀（PID + 进程名）→ 循环等进程退出 →
+          解压到临时目录 → xcopy 覆盖（失败重试3次）→ 清理
     每步写调试日志到 %TEMP%\\SteamShelf_update_debug.txt。
     """
     dbg = os.path.join(tempfile.gettempdir(),
                        "SteamShelf_update_debug.txt").replace("/", "\\")
-    return (
-        '@echo off\r\n'
-        f'echo [%date% %time%] update.bat started >> "{dbg}"\r\n'
-        f'echo PID={pid} zip={zip_ps} >> "{dbg}"\r\n'
-        f'echo app_dir={app_dir} >> "{dbg}"\r\n'
-        f'echo exe_path={exe_path} >> "{dbg}"\r\n'
-        f'echo [%date% %time%] taskkill /F /PID {pid} >> "{dbg}"\r\n'
-        f'taskkill /F /PID {pid} >nul 2>&1\r\n'
-        f'echo [%date% %time%] waiting 5s >> "{dbg}"\r\n'
-        'timeout /t 5 /nobreak >nul\r\n'
-        f'echo [%date% %time%] cleanup old tmp_dir >> "{dbg}"\r\n'
-        f'if exist "{tmp_dir_ps}" rd /s /q "{tmp_dir_ps}" >nul 2>&1\r\n'
-        f'echo [%date% %time%] Expand-Archive start >> "{dbg}"\r\n'
-        f'powershell -NoProfile -Command "'
+    exe_name = os.path.basename(exe_path)
+    lines = [
+        '@echo off',
+        f'echo [%date% %time%] update.bat started >> "{dbg}"',
+        f'echo PID={pid} zip={zip_ps} >> "{dbg}"',
+        f'echo app_dir={app_dir} >> "{dbg}"',
+        f'echo exe_path={exe_path} >> "{dbg}"',
+        '',
+        'REM === Kill by PID + image name ===',
+        f'echo [%date% %time%] taskkill /F /PID {pid} >> "{dbg}"',
+        f'taskkill /F /PID {pid} >nul 2>&1',
+        f'echo [%date% %time%] taskkill /F /IM {exe_name} >> "{dbg}"',
+        f'taskkill /F /IM {exe_name} >nul 2>&1',
+        '',
+        'REM === Loop-wait until process is gone (max 30s) ===',
+        f'echo [%date% %time%] waiting for process exit >> "{dbg}"',
+        'set /a _wait=0',
+        ':wait_loop',
+        f'tasklist /FI "IMAGENAME eq {exe_name}" 2>nul '
+        f'| find /i "{exe_name}" >nul 2>&1',
+        'if errorlevel 1 goto wait_done',
+        'if %_wait% geq 30 goto wait_done',
+        'timeout /t 1 /nobreak >nul',
+        'set /a _wait+=1',
+        f'echo [%date% %time%] still waiting (%_wait%s) >> "{dbg}"',
+        'goto wait_loop',
+        ':wait_done',
+        f'echo [%date% %time%] process wait done (%_wait%s) >> "{dbg}"',
+        '',
+        'REM === Expand-Archive ===',
+        f'if exist "{tmp_dir_ps}" rd /s /q "{tmp_dir_ps}" >nul 2>&1',
+        f'echo [%date% %time%] Expand-Archive start >> "{dbg}"',
+        f"powershell -NoProfile -Command \""
         f"Expand-Archive -Force '{zip_ps}' '{tmp_dir_ps}'"
-        f'"\r\n'
-        f'echo [%date% %time%] Expand-Archive errorlevel=%errorlevel% >> "{dbg}"\r\n'
-        'if %errorlevel% neq 0 (\r\n'
-        f'  echo [SteamShelf] 解压到临时目录失败。> "{err_log}"\r\n'
-        f'  echo 可能原因：安全软件拦截或磁盘空间不足。>> "{err_log}"\r\n'
-        f'  echo [%date% %time%] FAIL: extract >> "{dbg}"\r\n'
-        f'  start notepad "{err_log}"\r\n'
-        f'  start "" "{exe_path}"\r\n'
-        '  del "%~f0"\r\n'
-        '  exit /b 1\r\n'
-        ')\r\n'
-        f'echo [%date% %time%] xcopy start >> "{dbg}"\r\n'
-        f'xcopy "{tmp_dir_ps}\\*" "{app_dir}\\" /E /Y /R /Q >nul 2>&1\r\n'
-        f'echo [%date% %time%] xcopy errorlevel=%errorlevel% >> "{dbg}"\r\n'
-        'if %errorlevel% neq 0 (\r\n'
-        f'  echo [SteamShelf] 复制文件失败，文件可能仍被占用。> "{err_log}"\r\n'
-        f'  echo 请手动关闭所有 SteamShelf 进程后重试。>> "{err_log}"\r\n'
-        f'  echo [%date% %time%] FAIL: xcopy >> "{dbg}"\r\n'
-        f'  start notepad "{err_log}"\r\n'
-        f'  start "" "{exe_path}"\r\n'
-        '  del "%~f0"\r\n'
-        '  exit /b 1\r\n'
-        ')\r\n'
-        f'echo [%date% %time%] cleanup tmp_dir >> "{dbg}"\r\n'
-        f'rd /s /q "{tmp_dir_ps}" >nul 2>&1\r\n'
-        f'echo [%date% %time%] starting exe >> "{dbg}"\r\n'
-        f'start "" "{exe_path}"\r\n'
-        f'echo [%date% %time%] SUCCESS, deleting bat >> "{dbg}"\r\n'
-        f'start notepad "{dbg}"\r\n'
-        'del "%~f0"\r\n'
-    )
+        f"\"",
+        f'echo [%date% %time%] Expand-Archive errorlevel='
+        f'%errorlevel% >> "{dbg}"',
+        'if %errorlevel% neq 0 (',
+        f'  echo [SteamShelf] 解压到临时目录失败。> "{err_log}"',
+        f'  echo 可能原因：安全软件拦截或磁盘空间不足。>> "{err_log}"',
+        f'  echo [%date% %time%] FAIL: extract >> "{dbg}"',
+        f'  start notepad "{dbg}"',
+        f'  start "" "{exe_path}"',
+        '  del "%~f0"',
+        '  exit /b 1',
+        ')',
+        '',
+        'REM === xcopy with retry (max 3 attempts) ===',
+        'set /a _try=0',
+        ':xcopy_retry',
+        'set /a _try+=1',
+        f'echo [%date% %time%] xcopy attempt %_try% >> "{dbg}"',
+        f'xcopy "{tmp_dir_ps}\\*" "{app_dir}\\" /E /Y /R /Q >nul 2>&1',
+        f'echo [%date% %time%] xcopy errorlevel='
+        f'%errorlevel% >> "{dbg}"',
+        'if %errorlevel% equ 0 goto xcopy_ok',
+        'if %_try% geq 3 goto xcopy_fail',
+        f'echo [%date% %time%] xcopy failed, retry in 5s >> "{dbg}"',
+        'timeout /t 5 /nobreak >nul',
+        'goto xcopy_retry',
+        ':xcopy_fail',
+        f'echo [SteamShelf] 复制文件失败（重试3次）。> "{err_log}"',
+        f'echo 文件可能被安全软件或其他进程占用。>> "{err_log}"',
+        f'echo [%date% %time%] FAIL: xcopy after 3 tries >> "{dbg}"',
+        f'start notepad "{dbg}"',
+        f'start "" "{exe_path}"',
+        'del "%~f0"',
+        'exit /b 1',
+        ':xcopy_ok',
+        '',
+        'REM === Cleanup and restart ===',
+        f'echo [%date% %time%] cleanup tmp_dir >> "{dbg}"',
+        f'rd /s /q "{tmp_dir_ps}" >nul 2>&1',
+        f'echo [%date% %time%] starting exe >> "{dbg}"',
+        f'start "" "{exe_path}"',
+        f'echo [%date% %time%] SUCCESS >> "{dbg}"',
+        f'start notepad "{dbg}"',
+        'del "%~f0"',
+    ]
+    return '\r\n'.join(lines) + '\r\n'
 
 
 def apply_update_and_restart(zip_path, app_dir=None):
