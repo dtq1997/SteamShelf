@@ -268,7 +268,9 @@ class CEFBridge:
                     f'Steam.AppBundle/Steam/Contents/MacOS/steam_osx"'
                     f' -cef-enable-debugging -devtools-port {CEFBridge.CEF_PORT}')
         elif system == "Windows":
-            return (f'"C:\\Program Files (x86)\\Steam\\steam.exe"'
+            exe = CEFBridge._find_steam_exe_windows()
+            exe_str = f'"{exe}"' if exe else r'"<Steam安装路径>\steam.exe"'
+            return (f'{exe_str}'
                     f' -cef-enable-debugging -devtools-port {CEFBridge.CEF_PORT}')
         elif system == "Linux":
             return f'steam -cef-enable-debugging -devtools-port {CEFBridge.CEF_PORT}'
@@ -277,6 +279,8 @@ class CEFBridge:
     @classmethod
     def _get_steam_data_dir(cls) -> Optional[str]:
         """获取 Steam 数据目录（用于放置 .cef-enable-remote-debugging 文件）
+
+        检测优先级：注册表 → 常见路径 → 动态盘符扫描（Windows）
 
         Returns:
             路径字符串，或 None
@@ -290,13 +294,22 @@ class CEFBridge:
                 os.path.join(home, "Library/Application Support/Steam"),
             ]
         elif system == "Windows":
-            candidates = [
+            candidates = []
+            # 注册表（最可靠）
+            reg_path = cls._get_steam_path_from_registry()
+            if reg_path:
+                candidates.append(reg_path)
+            candidates.extend([
                 os.path.expandvars(r"%ProgramFiles(x86)%\Steam"),
                 os.path.expandvars(r"%ProgramFiles%\Steam"),
-                r"C:\Program Files (x86)\Steam",
-                r"C:\Steam",
-                r"D:\Steam",
-            ]
+            ])
+            # 动态枚举所有盘符
+            for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                drive = f"{letter}:\\"
+                if os.path.exists(drive):
+                    candidates.append(f"{letter}:\\Steam")
+                    candidates.append(f"{letter}:\\Program Files (x86)\\Steam")
+                    candidates.append(f"{letter}:\\Program Files\\Steam")
         elif system == "Linux":
             candidates = [
                 os.path.join(home, ".steam/steam"),
@@ -308,6 +321,62 @@ class CEFBridge:
         for p in candidates:
             if os.path.isdir(p):
                 return p
+        return None
+
+    @staticmethod
+    def _get_steam_path_from_registry() -> Optional[str]:
+        """从 Windows 注册表获取 Steam 安装路径（最可靠的检测方式）"""
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\WOW6432Node\Valve\Steam")
+            install_path, _ = winreg.QueryValueEx(key, "InstallPath")
+            winreg.CloseKey(key)
+            if install_path and os.path.isdir(install_path):
+                return install_path
+        except (OSError, ImportError):
+            pass
+        return None
+
+    @classmethod
+    def _find_steam_exe_windows(cls, hint_path: str = "") -> Optional[str]:
+        """在 Windows 上查找 steam.exe 路径
+
+        检测优先级：
+        1. 调用者提供的 hint_path（来自 account.steam_path）
+        2. 注册表
+        3. 动态枚举所有盘符
+        """
+        candidates = []
+        # 1. 调用者提供的路径
+        if hint_path:
+            candidates.append(os.path.join(hint_path, "steam.exe"))
+        # 2. 注册表
+        reg_path = cls._get_steam_path_from_registry()
+        if reg_path:
+            candidates.append(os.path.join(reg_path, "steam.exe"))
+        # 3. 环境变量
+        candidates.append(os.path.expandvars(
+            r"%ProgramFiles(x86)%\Steam\steam.exe"))
+        candidates.append(os.path.expandvars(
+            r"%ProgramFiles%\Steam\steam.exe"))
+        # 4. 动态枚举盘符
+        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            drive = f"{letter}:\\"
+            if os.path.exists(drive):
+                candidates.append(f"{letter}:\\Steam\\steam.exe")
+                candidates.append(
+                    f"{letter}:\\Program Files (x86)\\Steam\\steam.exe")
+                candidates.append(
+                    f"{letter}:\\Program Files\\Steam\\steam.exe")
+        # 去重并查找
+        seen = set()
+        for p in candidates:
+            if p not in seen:
+                seen.add(p)
+                if os.path.isfile(p):
+                    return p
         return None
 
     @classmethod
@@ -349,9 +418,12 @@ class CEFBridge:
         flag_path = os.path.join(steam_dir, ".cef-enable-remote-debugging")
         return os.path.exists(flag_path), flag_path
 
-    @staticmethod
-    def launch_steam_with_cef() -> Tuple[bool, str]:
+    @classmethod
+    def launch_steam_with_cef(cls, steam_path: str = "") -> Tuple[bool, str]:
         """尝试以 CEF 调试模式启动 Steam（会先关闭已运行的 Steam）
+
+        Args:
+            steam_path: 已知的 Steam 安装路径（可选，由调用者传入以避免重复检测）
 
         === macOS 关键注意事项 ===
         
@@ -469,20 +541,18 @@ class CEFBridge:
                     subprocess.Popen([steam_bin] + steam_args, start_new_session=True)
 
             elif system == "Windows":
-                steam_paths = [
-                    r"C:\Program Files (x86)\Steam\steam.exe",
-                    r"D:\Steam\steam.exe",
-                    r"D:\Program Files (x86)\Steam\steam.exe",
-                ]
-                launched = False
-                for path in steam_paths:
-                    if os.path.exists(path):
-                        subprocess.Popen([path] + steam_args)
-                        launched = True
-                        break
-                if not launched:
-                    cmd = CEFBridge.get_steam_launch_command()
-                    return False, f"未找到 Steam，请手动运行:\n{cmd}"
+                steam_exe = cls._find_steam_exe_windows(steam_path)
+                if steam_exe:
+                    subprocess.Popen([steam_exe] + steam_args)
+                else:
+                    # 终极兜底：用 steam:// 协议 URL 启动（无需知道路径）
+                    # 注意：协议启动无法传递 CEF 参数，但 .cef-enable-remote-debugging
+                    # 文件已在前面创建，Steam 会读取该文件自动启用 CEF
+                    try:
+                        os.startfile("steam://open/main")  # noqa: S606
+                    except Exception:
+                        cmd = cls.get_steam_launch_command()
+                        return False, f"未找到 Steam，请手动运行:\n{cmd}"
             elif system == "Linux":
                 subprocess.Popen(['steam'] + steam_args)
             else:

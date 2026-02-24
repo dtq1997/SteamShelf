@@ -232,7 +232,8 @@ class SteamToolboxIntro:
             status_label.config(text="正在关闭并重启 Steam...", fg="#1a6dcc")
 
             def do_start():
-                ok, msg = CEFBridge.launch_steam_with_cef()
+                ok, msg = CEFBridge.launch_steam_with_cef(
+                    steam_path=account.steam_path)
                 if not ok:
                     root.after(0, lambda: (
                         status_label.config(text=f"❌ {msg}", fg="red"),

@@ -12,6 +12,8 @@ import time
 import urllib.error
 import urllib.request
 
+from utils import urlopen as _urlopen
+
 
 class IGDBMixin:
     """IGDB API 交互（Mixin，self 指向 SteamToolboxCore 实例）"""
@@ -92,7 +94,7 @@ class IGDBMixin:
 
         try:
             req = urllib.request.Request(token_url, method='POST')
-            with urllib.request.urlopen(req, timeout=15, context=self.ssl_context) as resp:
+            with _urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
 
             access_token = data.get("access_token", "")
@@ -167,7 +169,7 @@ class IGDBMixin:
                 body = f"fields id,name,slug; where id = ({ids_str}); limit {batch_size};"
                 try:
                     req = urllib.request.Request(url, data=body.encode('utf-8'), headers=headers, method='POST')
-                    with urllib.request.urlopen(req, timeout=30, context=self.ssl_context) as resp:
+                    with _urlopen(req, timeout=30) as resp:
                         batch_items = json.loads(resp.read().decode('utf-8'))
                         all_items.extend(batch_items)
                 except urllib.error.HTTPError as e:
@@ -191,7 +193,7 @@ class IGDBMixin:
                 body = f"fields id,name,slug; limit {limit}; offset {offset}; sort name asc;"
                 try:
                     req = urllib.request.Request(url, data=body.encode('utf-8'), headers=headers, method='POST')
-                    with urllib.request.urlopen(req, timeout=30, context=self.ssl_context) as resp:
+                    with _urlopen(req, timeout=30) as resp:
                         batch = json.loads(resp.read().decode('utf-8'))
                 except urllib.error.HTTPError as e:
                     return [], f"HTTP 错误 {e.code}：获取{dim_info['name']}列表失败"
@@ -372,7 +374,7 @@ class IGDBMixin:
         for attempt in range(max_retries):
             try:
                 req = urllib.request.Request(url, data=body.encode('utf-8'), headers=headers, method='POST')
-                with urllib.request.urlopen(req, timeout=30, context=self.ssl_context) as resp:
+                with _urlopen(req, timeout=30) as resp:
                     return json.loads(resp.read().decode('utf-8')), None
             except urllib.error.HTTPError as e:
                 if e.code == 429:

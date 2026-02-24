@@ -11,7 +11,7 @@ import re
 import secrets
 import time
 
-from utils import steam_sort_key
+from utils import steam_sort_key, urlopen as _urlopen
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -309,7 +309,7 @@ class ScraperMixin:
                 progress_callback(0, 0, "正在验证鉴赏家页面...", "正在连接 Steam 商店...")
             try:
                 req = urllib.request.Request(page_url, headers=headers_html)
-                with urllib.request.urlopen(req, timeout=30, context=self.ssl_context) as resp:
+                with _urlopen(req, timeout=30) as resp:
                     html_content = resp.read().decode('utf-8')
                 page_name = self._extract_name_from_html(html_content, [
                     r'class="curator_name"[^>]*>.*?<a[^>]*>(.*?)</a>',
@@ -323,7 +323,7 @@ class ScraperMixin:
                 progress_callback(0, 0, "正在获取页面信息...", f"正在访问 {page_type}/{identifier} ...")
             try:
                 req = urllib.request.Request(page_url, headers=headers_html)
-                with urllib.request.urlopen(req, timeout=30, context=self.ssl_context) as resp:
+                with _urlopen(req, timeout=30) as resp:
                     html_content = resp.read().decode('utf-8')
             except Exception:
                 return None
@@ -551,7 +551,7 @@ class ScraperMixin:
 
                 try:
                     req = urllib.request.Request(url, headers=headers_api)
-                    with urllib.request.urlopen(req, timeout=30, context=self.ssl_context) as resp:
+                    with _urlopen(req, timeout=30) as resp:
                         data = json.loads(resp.read().decode('utf-8'))
 
                     if not data.get('success'):
@@ -670,7 +670,7 @@ class ScraperMixin:
 
         try:
             req = urllib.request.Request(base_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30, context=self.ssl_context) as resp:
+            with _urlopen(req, timeout=30) as resp:
                 html_content = resp.read().decode('utf-8')
 
             name_patterns = [
@@ -710,7 +710,7 @@ class ScraperMixin:
                                           f"📄 正在加载第 {page} 页...")
 
                     req_page = urllib.request.Request(ajax_url, headers=headers)
-                    with urllib.request.urlopen(req_page, timeout=15, context=self.ssl_context) as resp_page:
+                    with _urlopen(req_page, timeout=15) as resp_page:
                         page_html = resp_page.read().decode('utf-8')
 
                     page_ids = self.extract_ids_from_html(page_html)
@@ -961,7 +961,7 @@ class ScraperMixin:
 
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=20, context=self.ssl_context) as resp:
+            with _urlopen(req, timeout=20) as resp:
                 html_content = resp.read().decode('utf-8')
 
             if progress_callback:
