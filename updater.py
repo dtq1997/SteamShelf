@@ -12,10 +12,11 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.9.2"
+__version__ = "5.9.3"
 
 UPDATE_SOURCES = [
-    "https://gitee.com/dtq1997/SteamShelf/releases/download/latest/version.json",
+    "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
+    "https://ghfast.top/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
     "https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
 ]
 
@@ -92,7 +93,7 @@ def check_update(timeout=10):
                     "download_urls": urls,
                     "min_version": data.get("min_version", ""),
                 }
-            return None  # 已是最新
+            continue  # 该源无更新，继续检查下一个源
         except Exception as e:
             last_err = e
             continue
