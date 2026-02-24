@@ -421,9 +421,12 @@ class SteamToolboxMain(
         else:
             self.root.after(500, self._auto_connect_cef)
 
-        # 自动更新：清理残留 + 后台检查
+        # 自动更新：清理残留 + 后台检查 + 更新成功提示
         import updater
         updater.cleanup_update()
+        if updater.check_update_success():
+            self.root.after(500,
+                            lambda: self._show_update_toast(updater.__version__))
         self.root.after(2000, self._check_update_bg)
 
         # 订阅同步：启动后延迟拉取远端更新

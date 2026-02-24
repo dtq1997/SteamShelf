@@ -183,27 +183,73 @@ class UpdaterMixin:
                 prog_label.config(text="下载失败，请检查网络后重试")
                 update_btn.config(state=tk.NORMAL)
                 return
-            prog_label.config(text="下载完成，准备更新...")
             prog_bar['value'] = 100
-            # apply 可能涉及文件 I/O（Defender 扫描会锁文件），放后台
-            def _apply():
-                result = updater.apply_update_and_restart(dest)
-                # Windows frozen 走 os._exit(0)，不会到这里
-                # 非 frozen 返回 zip_path，主线程显示提示
-                if result:
-                    self.root.after(0, lambda: _after_apply(result))
-            def _after_apply(result):
-                try:
-                    if win.winfo_exists():
-                        self._update_dialog_open = False
-                        win.grab_release()
-                        win.destroy()
-                except Exception:
-                    pass
-                self._show_update_success_dialog(result, info["version"])
-            threading.Thread(target=bg_thread(_apply), daemon=True).start()
+            # Windows frozen：倒计时 3 秒后重启
+            import sys as _sys2
+            if _sys2.platform == "win32" and getattr(_sys2, 'frozen', False):
+                self._update_countdown(
+                    win, prog_label, 3,
+                    lambda: self._apply_update_bg(dest, win))
+            else:
+                prog_label.config(text="下载完成，准备更新...")
+                self._apply_update_bg(dest, win, info)
+
+        def _countdown_tick(remaining, win, label, on_zero):
+            try:
+                if not win.winfo_exists():
+                    return
+            except Exception:
+                return
+            if remaining <= 0:
+                label.config(text="正在重启...")
+                on_zero()
+                return
+            label.config(text=f"下载完成，{remaining} 秒后自动重启...")
+            self.root.after(1000, lambda: _countdown_tick(
+                remaining - 1, win, label, on_zero))
+
+        self._update_countdown = lambda win, label, secs, cb: \
+            _countdown_tick(secs, win, label, cb)
 
         threading.Thread(target=bg_thread(_bg), daemon=True).start()
+
+    def _apply_update_bg(self, dest, win, info=None):
+        """后台应用更新（Windows frozen 走 os._exit，其他走手动提示）"""
+        def _apply():
+            result = updater.apply_update_and_restart(dest)
+            # Windows frozen 走 os._exit(0)，不会到这里
+            if result:
+                self.root.after(0, lambda: _after_apply(result))
+        def _after_apply(result):
+            try:
+                if win.winfo_exists():
+                    self._update_dialog_open = False
+                    win.grab_release()
+                    win.destroy()
+            except Exception:
+                pass
+            self._show_update_success_dialog(result, info["version"])
+        threading.Thread(target=bg_thread(_apply), daemon=True).start()
+
+    def _show_update_toast(self, version):
+        """启动时显示更新成功的短暂提示（3秒后自动消失）"""
+        toast = tk.Toplevel(self.root)
+        toast.overrideredirect(True)
+        toast.attributes("-topmost", True)
+        frame = tk.Frame(toast, bg="#4caf50", padx=16, pady=10)
+        frame.pack()
+        tk.Label(frame, text=f"已更新到 v{version}",
+                 font=("", 11, "bold"), bg="#4caf50", fg="white"
+                 ).pack()
+        # 居中于主窗口顶部
+        self.root.update_idletasks()
+        rx = self.root.winfo_x()
+        rw = self.root.winfo_width()
+        ry = self.root.winfo_y()
+        toast.update_idletasks()
+        tw = toast.winfo_reqwidth()
+        toast.geometry(f"+{rx + (rw - tw) // 2}+{ry + 8}")
+        toast.after(3000, toast.destroy)
 
     def _show_update_success_dialog(self, zip_path, version):
         """下载完成后的友好提示对话框（非 Windows frozen 专用）"""

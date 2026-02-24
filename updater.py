@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.10.6"
+__version__ = "5.10.7"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -255,13 +255,14 @@ def _build_update_bat(pid, zip_ps, tmp_dir_ps, app_dir, exe_path, err_log):
         'exit /b 1',
         ':xcopy_ok',
         '',
-        'REM === Cleanup and restart ===',
+        'REM === Write success marker and restart ===',
         f'echo [%date% %time%] cleanup tmp_dir >> "{dbg}"',
         f'rd /s /q "{tmp_dir_ps}" >nul 2>&1',
+        f'echo [%date% %time%] writing success marker >> "{dbg}"',
+        f'echo ok > "{app_dir}\\_update_ok"',
         f'echo [%date% %time%] starting exe >> "{dbg}"',
         f'start "" "{exe_path}"',
         f'echo [%date% %time%] SUCCESS >> "{dbg}"',
-        f'start notepad "{dbg}"',
         'del "%~f0"',
     ]
     return '\r\n'.join(lines) + '\r\n'
@@ -353,6 +354,18 @@ def cleanup_update():
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
             pass
+
+
+def check_update_success() -> bool:
+    """检查是否刚完成自动更新（bat 写的标记文件），检测后清除"""
+    marker = os.path.join(get_app_dir(), "_update_ok")
+    if os.path.exists(marker):
+        try:
+            os.remove(marker)
+        except Exception:
+            pass
+        return True
+    return False
 
 
 def get_temp_zip_path() -> str:
