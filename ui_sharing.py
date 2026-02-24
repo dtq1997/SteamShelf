@@ -205,9 +205,10 @@ class SharingMixin:
                 except Exception:
                     pass
             except Exception as e:
+                err = str(e)
                 try:
                     win.after(0, lambda: self._on_share_done(
-                        win, False, str(e), btn=btn))
+                        win, False, err, btn=btn))
                 except Exception:
                     pass
 
@@ -371,8 +372,9 @@ class SharingMixin:
                 except Exception:
                     pass
             except Exception as e:
+                err = str(e)
                 try:
-                    win.after(0, lambda: status_var.set(f"加载失败: {e}"))
+                    win.after(0, lambda: status_var.set(f"加载失败: {err}"))
                 except Exception:
                     pass
 
@@ -445,9 +447,10 @@ class SharingMixin:
                     except Exception:
                         pass
             except Exception as e:
+                err = str(e)
                 try:
                     tree.after(0, lambda: self._set_browse_detail(
-                        f"加载失败: {e}"))
+                        f"加载失败: {err}"))
                 except Exception:
                     pass
 
@@ -623,9 +626,10 @@ class SharingMixin:
                 except Exception:
                     pass
             except Exception as e:
+                err = str(e)
                 try:
                     win.after(0, lambda: self._on_delete_done(
-                        win, tree, status_var, rid, False, str(e)))
+                        win, tree, status_var, rid, False, err))
                 except Exception:
                     pass
 
@@ -730,10 +734,11 @@ class SharingMixin:
                 except Exception:
                     pass
             except Exception as e:
+                err = str(e)
                 try:
                     edit_win.after(0, lambda: self._on_edit_done(
                         edit_win, browse_win, tree, status_var,
-                        rid, title, desc, False, str(e),
+                        rid, title, desc, False, err,
                         btn=btn, status_label=status_label))
                 except Exception:
                     pass

@@ -21,6 +21,7 @@
 3. **状态依赖**：依赖哪些共享状态？可能读到过期值吗？
 4. **破坏面**：最可能出错的地方？
 5. **外部工具**：涉及 shell/bat/PowerShell 命令时，验证其在目标平台的实际行为，不基于名称推断
+6. **Python 版本**：使用的语言特性是否在目标版本有行为变更？（如 3.13 except 变量作用域）
 
 **阶段 B — 实现（最小改动）：**
 - 写代码，只改必要的部分
@@ -150,6 +151,7 @@
 - CEF Bridge ≠ Steam Cloud，两套独立机制
 - `_eval_filter_expression` 候选集必须含 notes-only + uploading 游戏
 - **Windows 文件锁 + 外部工具陷阱**：`Expand-Archive -Force` 内部是 delete-then-write，锁定的 .pyd 文件删除失败 → 整个解压失败。Pre-mortem 必须追问外部工具在目标平台的实际行为，不能基于名称推断语义。正确做法：解压到临时目录 → xcopy 覆盖（不需要先删除）
+- **Python 3.13 except 变量作用域**：`except Exception as e:` 的 `e` 在 except 块退出后被删除。lambda 闭包捕获的是变量引用而非值，延迟执行时 `e` 已不存在 → `NameError: cannot access free variable 'e'`。修法：`err = str(e)` 在 lambda 之前捕获值。全扫模式：`grep -n "lambda.*\be\b"` + 检查是否在 except 块内
 
 ## 🔴 发版流程（每次发版必须走完）
 
