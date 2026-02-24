@@ -20,6 +20,7 @@
 2. **并行路径**：有没有「做同一件事但实现不同」的代码？有 → 必须同时改
 3. **状态依赖**：依赖哪些共享状态？可能读到过期值吗？
 4. **破坏面**：最可能出错的地方？
+5. **外部工具**：涉及 shell/bat/PowerShell 命令时，验证其在目标平台的实际行为，不基于名称推断
 
 **阶段 B — 实现（最小改动）：**
 - 写代码，只改必要的部分
@@ -148,6 +149,7 @@
 - `CollectionsCore` 接受 `SteamAccount` 对象，不是路径
 - CEF Bridge ≠ Steam Cloud，两套独立机制
 - `_eval_filter_expression` 候选集必须含 notes-only + uploading 游戏
+- **Windows 文件锁 + 外部工具陷阱**：`Expand-Archive -Force` 内部是 delete-then-write，锁定的 .pyd 文件删除失败 → 整个解压失败。Pre-mortem 必须追问外部工具在目标平台的实际行为，不能基于名称推断语义。正确做法：解压到临时目录 → xcopy 覆盖（不需要先删除）
 
 ## 🔴 发版流程（每次发版必须走完）
 
