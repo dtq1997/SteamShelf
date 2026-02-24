@@ -1,8 +1,15 @@
 # SteamShelf 发版指南
 
+## ⛔ 绝对禁止（违反此规则 = 发版失败）
+
+1. **禁止 `gh release create`** — 手动创建的 release 没有 Win/Mac 构建包，新用户无法下载
+2. **唯一正确路径：`git tag` + `git push --tags`** — 由 GitHub Actions 自动构建三平台 + 创建 release
+3. **发版完成的定义：Release 页面同时存在 `SteamShelf_win.zip` + `SteamShelf_mac.zip` + `SteamShelf_source.zip` + `version.json`** — 缺任何一个都不算完成
+4. **`_scripts/` 目录含敏感数据（API key）** — 任何打包操作必须排除
+
 ## 给 AI 助手的指令
 
-当用户说"发版"、"更新给用户"、"推新版本"时，执行以下步骤：
+当用户说"发版"、"更新给用户"、"推新版本"、"推更新"时，执行以下步骤：
 
 ### 步骤 1：确定版本号
 
