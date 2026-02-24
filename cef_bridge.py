@@ -110,15 +110,20 @@ class CEFBridge:
                 result['cef_arg_detected'] = any(
                     any(arg in line for arg in _CEF_ARGS) for line in lines)
             elif system == "Windows":
+                _NW = subprocess.CREATE_NO_WINDOW
                 ps = subprocess.run(['tasklist', '/fi', 'imagename eq steam.exe'],
-                                    capture_output=True, text=True, timeout=5)
+                                    capture_output=True, text=True, timeout=5,
+                                    creationflags=_NW)
                 result['steam_running'] = 'steam.exe' in ps.stdout.lower()
                 if result['steam_running']:
                     result['steam_processes'] = ['steam.exe (running)']
                 try:
                     wmic = subprocess.run(
-                        ['wmic', 'process', 'where', "name='steam.exe'", 'get', 'commandline'],
-                        capture_output=True, text=True, timeout=5)
+                        ['powershell', '-NoProfile', '-Command',
+                         "Get-CimInstance Win32_Process -Filter \"name='steam.exe'\" "
+                         "| Select-Object -ExpandProperty CommandLine"],
+                        capture_output=True, text=True, timeout=5,
+                        creationflags=_NW)
                     result['cef_arg_detected'] = any(arg in wmic.stdout for arg in _CEF_ARGS)
                 except Exception:
                     pass
@@ -232,7 +237,8 @@ class CEFBridge:
                         info['process_names'].append('steamwebhelper')
             elif system == "Windows":
                 ps = subprocess.run(['tasklist', '/fi', 'imagename eq steam.exe'],
-                                    capture_output=True, text=True, timeout=3)
+                                    capture_output=True, text=True, timeout=3,
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
                 if 'steam.exe' in ps.stdout.lower():
                     info['running'] = True
                     info['process_names'].append('steam.exe')
@@ -398,7 +404,7 @@ class CEFBridge:
             return True, f"CEF 调试标记文件已存在: {flag_path}"
 
         try:
-            with open(flag_path, 'w'):
+            with open(flag_path, 'w', encoding='utf-8'):
                 pass  # 创建空文件
             return True, f"已创建 CEF 调试标记文件: {flag_path}"
         except Exception as e:
@@ -471,7 +477,9 @@ class CEFBridge:
                     subprocess.run(['killall', '-9', name],
                                    capture_output=True, timeout=5)
             elif system == "Windows":
-                subprocess.run(['taskkill', '/f', '/im', 'steam.exe'], capture_output=True, timeout=5)
+                subprocess.run(['taskkill', '/f', '/im', 'steam.exe'],
+                               capture_output=True, timeout=5,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
             elif system == "Linux":
                 subprocess.run(['killall', '-9', 'steam'], capture_output=True, timeout=5)
         except Exception:

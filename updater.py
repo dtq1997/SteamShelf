@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.9.5"
+__version__ = "5.9.6"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -177,7 +177,7 @@ def apply_update_and_restart(zip_path, app_dir=None):
             f'start "" "{exe_path}"\r\n'
             'del "%~f0"\r\n'
         )
-        with open(bat_path, "w", encoding="gbk") as f:
+        with open(bat_path, "w", encoding="gbk", newline='') as f:
             f.write(bat_content)
         subprocess.Popen(
             ["cmd", "/c", bat_path],

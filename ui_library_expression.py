@@ -23,6 +23,7 @@
 
 import json
 import os
+import platform
 import threading
 import time
 import tkinter as tk
@@ -477,7 +478,8 @@ class LibraryExpressionMixin:
                      font=("", 9), fg="#888").pack()
 
         txt = tk.Text(win, width=60, height=min(len(lines) + 2, 25),
-                      font=("Monaco", 10), wrap=tk.WORD)
+                      font=("Monaco" if platform.system() == "Darwin" else "Consolas", 10),
+                      wrap=tk.WORD)
         txt.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
         txt.insert(tk.END, "\n".join(lines))
         txt.config(state=tk.DISABLED)

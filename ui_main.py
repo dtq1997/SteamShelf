@@ -102,7 +102,7 @@ class SteamToolboxMain(
         from ui_utils import _PERF_ENABLED, _PERF_LOG_PATH, perf_log
         if _PERF_ENABLED:
             try:
-                open(_PERF_LOG_PATH, 'w').close()
+                open(_PERF_LOG_PATH, 'w', encoding='utf-8').close()
             except OSError:
                 pass
             perf_log('APP_INIT start')

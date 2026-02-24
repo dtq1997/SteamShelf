@@ -63,10 +63,7 @@ class ScraperMixin:
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
 
-            if os.path.exists(self.current_account.storage_path):
-                os.replace(tmp_path, self.current_account.storage_path)
-            else:
-                os.rename(tmp_path, self.current_account.storage_path)
+            os.replace(tmp_path, self.current_account.storage_path)
 
             msg = f"文件已保存：{os.path.basename(self.current_account.storage_path)}{backup_info}"
             return True, msg

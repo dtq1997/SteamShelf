@@ -537,7 +537,7 @@ class SteamAccountScanner:
                 if os.path.exists(exe):
                     subprocess.Popen([exe])
                 else:
-                    subprocess.Popen(["start", "steam://"], shell=True)
+                    os.startfile("steam://open/main")
             else:
                 subprocess.Popen(["steam"])
             return True, "OK"

@@ -199,7 +199,8 @@ def _worker_process_main(cmd_queue, result_queue, dylib_path, work_dir, app_id):
 
     # 1. 准备工作目录
     os.makedirs(work_dir, exist_ok=True)
-    with open(os.path.join(work_dir, "steam_appid.txt"), "w") as f:
+    with open(os.path.join(work_dir, "steam_appid.txt"), "w",
+              encoding="utf-8") as f:
         f.write(app_id)
     os.chdir(work_dir)
 
@@ -374,7 +375,8 @@ class SteamCloudUploader:
             if system == "Windows":
                 result = subprocess.run(
                     ["tasklist", "/FI", "IMAGENAME eq steam.exe"],
-                    capture_output=True, text=True, timeout=5)
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW)
                 return "steam.exe" in result.stdout.lower()
             elif system == "Darwin":
                 result = subprocess.run(
