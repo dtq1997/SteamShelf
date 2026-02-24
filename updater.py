@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.9.8"
+__version__ = "5.9.9"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -189,24 +189,20 @@ def apply_update_and_restart(zip_path, app_dir=None):
         bat_path = os.path.join(app_dir, "_update.bat")
         zp = zip_path.replace("'", "''")
         ad = app_dir.replace("'", "''")
-        err_log = os.path.join(tempfile.gettempdir(), "SteamShelf_update_err.txt")
-        # Defender 排除：用 base64 编码避免 bat→PS→PS 三层引号嵌套
-        import base64
-        defender_ps = f"Add-MpPreference -ExclusionPath '{app_dir}'"
-        defender_b64 = base64.b64encode(
-            defender_ps.encode('utf-16-le')).decode('ascii')
+        err_log = os.path.join(tempfile.gettempdir(),
+                               "SteamShelf_update_err.txt")
         bat_content = (
             '@echo off\r\n'
             'timeout /t 2 /nobreak >nul\r\n'
-            # 尝试添加 Defender 排除（弹 UAC，用户拒绝则跳过）
-            f'powershell -NoProfile -Command "Start-Process powershell'
-            f" -Verb RunAs -ArgumentList '-NoProfile',"
-            f"'-EncodedCommand','{defender_b64}'"
-            f'" 2>nul\r\n'
-            # 解压更新
-            f'powershell -Command "Expand-Archive -Force \'{zp}\' \'{ad}\'"\r\n'
+            f'powershell -NoProfile -Command "'
+            f"Expand-Archive -Force '{zp}' '{ad}'"
+            f'"\r\n'
             'if %errorlevel% neq 0 (\r\n'
-            f'  echo SteamShelf 更新解压失败，请手动下载新版本覆盖安装。> "{err_log}"\r\n'
+            f'  echo SteamShelf 更新解压失败。> "{err_log}"\r\n'
+            f'  echo 可能原因：Windows 安全软件拦截了更新文件。>> "{err_log}"\r\n'
+            f'  echo 请在 Windows 安全中心将以下目录添加到排除项：>> "{err_log}"\r\n'
+            f'  echo {app_dir}>> "{err_log}"\r\n'
+            f'  echo 然后重新下载更新。>> "{err_log}"\r\n'
             f'  start notepad "{err_log}"\r\n'
             f'  start "" "{exe_path}"\r\n'
             '  del "%~f0"\r\n'
@@ -220,7 +216,7 @@ def apply_update_and_restart(zip_path, app_dir=None):
         subprocess.Popen(
             ["cmd", "/c", bat_path],
             creationflags=subprocess.CREATE_NO_WINDOW)
-        sys.exit(0)
+        os._exit(0)  # 硬退出，避免 sys.exit 被 tkinter 拦截
     else:
         # 非 Windows 或源码运行：返回 zip 路径让 UI 层提示手动替换
         return zip_path

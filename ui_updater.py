@@ -185,12 +185,23 @@ class UpdaterMixin:
                 return
             prog_label.config(text="下载完成，准备更新...")
             prog_bar['value'] = 100
-            result = updater.apply_update_and_restart(dest)
-            if result:
-                self._update_dialog_open = False
-                win.grab_release()
-                win.destroy()
+            # apply 可能涉及文件 I/O（Defender 扫描会锁文件），放后台
+            def _apply():
+                result = updater.apply_update_and_restart(dest)
+                # Windows frozen 走 os._exit(0)，不会到这里
+                # 非 frozen 返回 zip_path，主线程显示提示
+                if result:
+                    self.root.after(0, lambda: _after_apply(result))
+            def _after_apply(result):
+                try:
+                    if win.winfo_exists():
+                        self._update_dialog_open = False
+                        win.grab_release()
+                        win.destroy()
+                except Exception:
+                    pass
                 self._show_update_success_dialog(result, info["version"])
+            threading.Thread(target=bg_thread(_apply), daemon=True).start()
 
         threading.Thread(target=bg_thread(_bg), daemon=True).start()
 
