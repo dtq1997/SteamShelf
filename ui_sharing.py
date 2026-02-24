@@ -560,6 +560,13 @@ class SharingMixin:
             new_id = self._collections_core.add_static_collection(
                 data, name, filtered)
             col_mapping[name] = new_id
+            # 绑定来源（SSOT：统一用 source binding 标记来源）
+            author = row.get('persona_name', '社区')
+            self._collections_core.save_collection_source(
+                new_id, "community_share",
+                {"share_id": rid, "collection_name": name},
+                f"社区: {author}",
+                "replace")
             imported += 1
 
         if imported:

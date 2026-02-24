@@ -374,6 +374,23 @@ class LibrarySourceUpdateMixin:
                 ids = self._eval_filter_expression(src_params)
                 if not ids:
                     error = "表达式求值结果为空（相关分类可能已删除）"
+            elif src_type == 'community_share':
+                from ui_sharing import _supabase_get
+                share_id = src_params.get('share_id', '')
+                col_name = src_params.get('collection_name', '')
+                rows = _supabase_get(
+                    "shared_collections",
+                    f"id=eq.{share_id}&limit=1")
+                if rows:
+                    for c in rows[0].get("collections", []):
+                        if c.get("name") == col_name:
+                            ids = [int(a) for a in c.get("added", [])
+                                   if str(a).isdigit()]
+                            break
+                    if not ids:
+                        error = f"远端分享中未找到分类「{col_name}」"
+                else:
+                    error = "分享已被删除或无法访问"
             else:
                 error = f"未知的来源类型: {src_type}"
         except Exception as e:

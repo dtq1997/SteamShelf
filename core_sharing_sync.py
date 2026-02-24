@@ -159,6 +159,7 @@ class SharingSyncEngine:
         subs = self.get_subscriptions()
         info = subs.get(share_id, {})
         col_mapping = dict(info.get("col_mapping", {}))
+        author = info.get("author", "社区")
 
         updated = 0
         added = 0
@@ -176,16 +177,24 @@ class SharingSyncEngine:
                 if ok:
                     updated += 1
                 else:
-                    # 本地分类已删除 → 重新创建
+                    # 本地分类已删除 → 重新创建 + 绑定来源
                     new_id = collections_core.add_static_collection(
                         local_data, name, aids)
                     col_mapping[name] = new_id
+                    collections_core.save_collection_source(
+                        new_id, "community_share",
+                        {"share_id": share_id, "collection_name": name},
+                        f"社区: {author}", "replace")
                     added += 1
             else:
-                # 新分类 → 创建
+                # 新分类 → 创建 + 绑定来源
                 new_id = collections_core.add_static_collection(
                     local_data, name, aids)
                 col_mapping[name] = new_id
+                collections_core.save_collection_source(
+                    new_id, "community_share",
+                    {"share_id": share_id, "collection_name": name},
+                    f"社区: {author}", "replace")
                 added += 1
 
         # 清理：远端已移除的分类从 mapping 中删除（本地保留）
