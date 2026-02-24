@@ -41,7 +41,8 @@ def _supabase_request(method, table, *, params="", payload=None, headers=None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
     resp = utils.urlopen(req, timeout=30)
-    return json.loads(resp.read().decode("utf-8"))
+    body = resp.read().decode("utf-8")
+    return json.loads(body) if body.strip() else []
 
 
 def _supabase_post(table, payload):

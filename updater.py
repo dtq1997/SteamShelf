@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.10.3"
+__version__ = "5.10.4"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
