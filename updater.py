@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.10.0"
+__version__ = "5.10.1"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -176,6 +176,43 @@ def _mirror_label(url: str) -> str:
     return url.split('/')[2][:20]
 
 
+def _build_update_bat(pid, zip_ps, tmp_dir_ps, app_dir, exe_path, err_log):
+    """生成健壮的更新批处理脚本
+
+    策略：taskkill 强杀 → 等进程退出 → 解压到临时目录 → xcopy 覆盖 → 清理
+    解决 Expand-Archive 直接覆盖时 .pyd 文件被锁的问题。
+    """
+    return (
+        '@echo off\r\n'
+        f'taskkill /F /PID {pid} >nul 2>&1\r\n'
+        'timeout /t 5 /nobreak >nul\r\n'
+        f'if exist "{tmp_dir_ps}" rd /s /q "{tmp_dir_ps}" >nul 2>&1\r\n'
+        f'powershell -NoProfile -Command "'
+        f"Expand-Archive -Force '{zip_ps}' '{tmp_dir_ps}'"
+        f'"\r\n'
+        'if %errorlevel% neq 0 (\r\n'
+        f'  echo [SteamShelf] 解压到临时目录失败。> "{err_log}"\r\n'
+        f'  echo 可能原因：安全软件拦截或磁盘空间不足。>> "{err_log}"\r\n'
+        f'  start notepad "{err_log}"\r\n'
+        f'  start "" "{exe_path}"\r\n'
+        '  del "%~f0"\r\n'
+        '  exit /b 1\r\n'
+        ')\r\n'
+        f'xcopy "{tmp_dir_ps}\\*" "{app_dir}\\" /E /Y /R /Q >nul 2>&1\r\n'
+        'if %errorlevel% neq 0 (\r\n'
+        f'  echo [SteamShelf] 复制文件失败，文件可能仍被占用。> "{err_log}"\r\n'
+        f'  echo 请手动关闭所有 SteamShelf 进程后重试。>> "{err_log}"\r\n'
+        f'  start notepad "{err_log}"\r\n'
+        f'  start "" "{exe_path}"\r\n'
+        '  del "%~f0"\r\n'
+        '  exit /b 1\r\n'
+        ')\r\n'
+        f'rd /s /q "{tmp_dir_ps}" >nul 2>&1\r\n'
+        f'start "" "{exe_path}"\r\n'
+        'del "%~f0"\r\n'
+    )
+
+
 def apply_update_and_restart(zip_path, app_dir=None):
     """写批处理脚本 → 启动 → 退出当前进程
 
@@ -186,31 +223,16 @@ def apply_update_and_restart(zip_path, app_dir=None):
 
     if sys.platform == "win32" and getattr(sys, 'frozen', False):
         exe_path = sys.executable
+        pid = os.getpid()
         bat_path = os.path.join(app_dir, "_update.bat")
-        zp = zip_path.replace("'", "''")
-        ad = app_dir.replace("'", "''")
+        tmp_dir = os.path.join(tempfile.gettempdir(), "SteamShelf_update_tmp")
         err_log = os.path.join(tempfile.gettempdir(),
                                "SteamShelf_update_err.txt")
-        bat_content = (
-            '@echo off\r\n'
-            'timeout /t 2 /nobreak >nul\r\n'
-            f'powershell -NoProfile -Command "'
-            f"Expand-Archive -Force '{zp}' '{ad}'"
-            f'"\r\n'
-            'if %errorlevel% neq 0 (\r\n'
-            f'  echo SteamShelf 更新解压失败。> "{err_log}"\r\n'
-            f'  echo 可能原因：Windows 安全软件拦截了更新文件。>> "{err_log}"\r\n'
-            f'  echo 请在 Windows 安全中心将以下目录添加到排除项：>> "{err_log}"\r\n'
-            f'  echo {app_dir}>> "{err_log}"\r\n'
-            f'  echo 然后重新下载更新。>> "{err_log}"\r\n'
-            f'  start notepad "{err_log}"\r\n'
-            f'  start "" "{exe_path}"\r\n'
-            '  del "%~f0"\r\n'
-            '  exit /b 1\r\n'
-            ')\r\n'
-            f'start "" "{exe_path}"\r\n'
-            'del "%~f0"\r\n'
-        )
+        # 转义 PowerShell 单引号
+        zp = zip_path.replace("'", "''")
+        td = tmp_dir.replace("'", "''")
+        bat_content = _build_update_bat(
+            pid, zp, td, app_dir, exe_path, err_log)
         with open(bat_path, "w", encoding="gbk", newline='') as f:
             f.write(bat_content)
         subprocess.Popen(
@@ -239,6 +261,14 @@ def cleanup_update():
                 os.remove(os.path.join(app_dir, f))
             except Exception:
                 pass
+    # 清理更新临时目录
+    tmp_dir = os.path.join(tempfile.gettempdir(), "SteamShelf_update_tmp")
+    if os.path.isdir(tmp_dir):
+        import shutil
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def get_temp_zip_path() -> str:
