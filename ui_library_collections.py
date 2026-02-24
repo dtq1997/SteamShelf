@@ -240,6 +240,11 @@ class LibraryCollectionsMixin(LibraryExpressionMixin):
         # 启动后台获取所有未入库游戏信息（Store API 补充）
         self._bg_resolve_all_unowned_types()
 
+        # 分享者同步：首次加载收藏夹后检测变动并上传（一次性）
+        if not getattr(self, '_sharer_sync_triggered', False):
+            self._sharer_sync_triggered = True
+            self.root.after(2000, self._sync_published_shares_bg)
+
 
     def _lib_render_collections_local(self, coll_tree):
         """使用本地 JSON 渲染收藏夹列表（CEF 未连接时的回退方案）"""

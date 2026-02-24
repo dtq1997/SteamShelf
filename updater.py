@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.9.4"
+__version__ = "5.9.5"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -210,3 +210,21 @@ def cleanup_update():
 def get_temp_zip_path() -> str:
     """返回临时 zip 文件路径"""
     return os.path.join(tempfile.gettempdir(), "SteamShelf_update.zip")
+
+
+def get_download_zip_path(version: str) -> str:
+    """返回用户友好的下载路径：~/Downloads/SteamShelf_vX.X.X.zip"""
+    downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+    os.makedirs(downloads, exist_ok=True)
+    return os.path.join(downloads, f"SteamShelf_v{version}.zip")
+
+
+def reveal_in_file_manager(path: str):
+    """在系统文件管理器中显示文件"""
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", path])
+    elif sys.platform == "win32":
+        subprocess.Popen(["explorer", f"/select,{path}"])
+    else:
+        # Linux: 打开所在目录
+        subprocess.Popen(["xdg-open", os.path.dirname(path)])

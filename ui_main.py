@@ -421,6 +421,9 @@ class SteamToolboxMain(
         updater.cleanup_update()
         self.root.after(2000, self._check_update_bg)
 
+        # 订阅同步：启动后延迟拉取远端更新
+        self.root.after(5000, self._sync_subscriptions_bg)
+
         # 窗口关闭时检查未保存的收藏夹更改 + 未上传笔记
         def _on_close():
             # 1. 检查未保存的收藏夹更改

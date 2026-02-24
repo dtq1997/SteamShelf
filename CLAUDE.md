@@ -133,6 +133,40 @@
 - CEF Bridge ≠ Steam Cloud，两套独立机制
 - `_eval_filter_expression` 候选集必须含 notes-only + uploading 游戏
 
+## 🔴 发版流程（每次发版必须走完）
+
+**触发条件**：用户说"推版本"/"发版"/"bump version" 时执行。
+
+**步骤：**
+1. `updater.py` 的 `__version__` bump 版本号
+2. `git add` 所有改动文件 → `git commit`（commit message 第一行即 changelog）
+3. `git push origin master`
+4. `git tag -a v{版本号} -m "changelog 内容"`（tag subject = changelog，CI 用 `%(contents:subject)` 提取）
+5. `git push origin v{版本号}` → 触发 CI
+6. `gh run watch` 等 CI 全绿
+7. `gh release view v{版本号}` 确认四个资产：win.zip + mac.zip + source.zip + version.json
+8. 下载 version.json 验证：版本号正确 + changelog 正确 + 三平台镜像 URL 齐全
+9. `curl` 验证至少一个国内镜像返回正确 version.json
+
+**CI 自动完成的事（不需要手动做）：**
+- 构建 win/mac/source 三平台包
+- 生成 version.json（含 gh-proxy + ghfast + github 三源镜像 URL）
+- 创建 GitHub Release 并上传所有资产
+
+**禁止事项：**
+- 禁止手动 `gh release create`（会和 CI 冲突）
+- 禁止在 push tag 前手动创建 release
+- tag message 不要把 Co-Authored-By 放在第一行（会变成 changelog）
+
+**更新管线架构（只读参考）：**
+```
+用户端: UPDATE_SOURCES(3镜像) → check_update() → version.json
+  → 三态返回: 有更新 / 无更新 / 网络失败
+  → download_update() → zip magic 校验 → apply_update_and_restart()
+  → Windows: bat 脚本 + Expand-Archive（失败弹 notepad）
+  → macOS/源码: 返回 zip 路径提示手动替换
+```
+
 ## 🟡 弹性规则
 
 **主动确认**：不确定时问用户，不猜。需求模糊先描述理解再动手。

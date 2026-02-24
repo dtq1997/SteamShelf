@@ -64,6 +64,9 @@ class UpdaterMixin:
 
     def _show_update_dialog(self, info):
         """弹窗显示更新日志 + 下载按钮"""
+        if getattr(self, '_update_dialog_open', False):
+            return
+        self._update_dialog_open = True
         win = tk.Toplevel(self.root)
         win.title(f"🔔 SteamShelf v{info['version']} 可用")
         win.resizable(False, True)
@@ -100,21 +103,29 @@ class UpdaterMixin:
             command=lambda: self._do_download_and_apply(
                 info, win, prog_frame, prog_label, prog_bar, update_btn))
         update_btn.pack(side=tk.LEFT, padx=5)
+        def _close_update_dialog():
+            self._update_dialog_open = False
+            win.grab_release()
+            win.destroy()
         ttk.Button(btn_frame, text="稍后再说",
-                   command=lambda: (win.grab_release(), win.destroy())
-                   ).pack(side=tk.LEFT, padx=5)
+                   command=_close_update_dialog).pack(side=tk.LEFT, padx=5)
 
-        win.protocol("WM_DELETE_WINDOW",
-                     lambda: (win.grab_release(), win.destroy()))
+        win.protocol("WM_DELETE_WINDOW", _close_update_dialog)
         self._center_window(win)
 
     def _do_download_and_apply(self, info, win, prog_frame,
                                 prog_label, prog_bar, update_btn):
         """后台下载 → 进度条 → 应用更新"""
+        import sys as _sys
         update_btn.config(state=tk.DISABLED)
         prog_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
         prog_label.config(text="正在下载...")
-        dest = updater.get_temp_zip_path()
+        # Windows frozen → 临时目录（bat 脚本自动处理）
+        # 其他 → ~/Downloads（用户友好）
+        if _sys.platform == "win32" and getattr(_sys, 'frozen', False):
+            dest = updater.get_temp_zip_path()
+        else:
+            dest = updater.get_download_zip_path(info["version"])
 
         def _progress(downloaded, total):
             def _ui():
@@ -152,12 +163,51 @@ class UpdaterMixin:
             prog_bar['value'] = 100
             result = updater.apply_update_and_restart(dest)
             if result:
-                # 非 Windows 或源码运行：提示手动替换
-                messagebox.showinfo("更新已下载",
-                    f"更新包已下载到:\n{result}\n\n"
-                    "请手动解压覆盖当前目录后重启。",
-                    parent=win)
+                self._update_dialog_open = False
                 win.grab_release()
                 win.destroy()
+                self._show_update_success_dialog(result, info["version"])
 
         threading.Thread(target=bg_thread(_bg), daemon=True).start()
+
+    def _show_update_success_dialog(self, zip_path, version):
+        """下载完成后的友好提示对话框（非 Windows frozen 专用）"""
+        import os
+        win = tk.Toplevel(self.root)
+        win.title("更新已下载")
+        win.resizable(False, False)
+        win.grab_set()
+        win.transient(self.root)
+
+        tk.Label(win, text=f"v{version} 已下载完成",
+                 font=("", 13, "bold")).pack(pady=(15, 5))
+
+        filename = os.path.basename(zip_path)
+        folder = os.path.dirname(zip_path)
+        tk.Label(win, text=f"文件：{filename}",
+                 font=("", 10)).pack(padx=20, pady=(5, 2))
+        tk.Label(win, text=f"位置：{folder}",
+                 font=("", 9), fg="#666").pack(padx=20, pady=(0, 5))
+
+        guide = tk.LabelFrame(win, text="更新步骤", font=("", 10),
+                              padx=10, pady=5)
+        guide.pack(fill=tk.X, padx=15, pady=8)
+        steps = ("1. 关闭当前程序\n"
+                 "2. 解压下载的 zip 文件\n"
+                 "3. 用新文件覆盖当前目录\n"
+                 "4. 重新启动")
+        tk.Label(guide, text=steps, justify="left", anchor="w",
+                 font=("", 10)).pack(fill=tk.X)
+
+        btn_frame = tk.Frame(win)
+        btn_frame.pack(pady=(5, 15))
+        ttk.Button(btn_frame, text="在文件管理器中显示",
+                   command=lambda: updater.reveal_in_file_manager(zip_path)
+                   ).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="关闭",
+                   command=lambda: (win.grab_release(), win.destroy())
+                   ).pack(side=tk.LEFT, padx=5)
+
+        win.protocol("WM_DELETE_WINDOW",
+                     lambda: (win.grab_release(), win.destroy()))
+        self._center_window(win)
