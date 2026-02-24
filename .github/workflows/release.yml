@@ -69,7 +69,7 @@ jobs:
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
           M1="https://gh-proxy.com/${BASE}"
           M2="https://ghfast.top/${BASE}"
-          CHANGELOG=$(git tag -l --format='%(contents:body)' "$TAG" | head -50)
+          CHANGELOG=$(git tag -l --format='%(contents:subject)' "$TAG")
           CHANGELOG_JSON=$(echo "$CHANGELOG" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")
           cat > artifacts/version.json << ENDJSON
           {

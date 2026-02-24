@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.9.3"
+__version__ = "5.9.4"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -67,13 +67,17 @@ def _resolve_platform_urls(download_urls) -> list:
 
 
 def check_update(timeout=10):
-    """检查更新，返回 dict 或 None
+    """检查更新
 
-    返回: {has_update, version, changelog, download_urls} 或 None（无更新/失败）
+    返回:
+      - {has_update: True, version, changelog, download_urls} — 有新版本
+      - {has_update: False} — 确认无更新（至少一个源成功响应）
+      - None — 所有源均失败（网络问题）
     """
     import urllib.request
     current = parse_version(__version__)
     last_err = None
+    any_success = False
 
     for source_url in UPDATE_SOURCES:
         try:
@@ -82,6 +86,7 @@ def check_update(timeout=10):
             with urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             remote = parse_version(data["version"])
+            any_success = True
             if remote > current:
                 urls = _resolve_platform_urls(data.get("download_urls", []))
                 if not urls:
@@ -93,14 +98,14 @@ def check_update(timeout=10):
                     "download_urls": urls,
                     "min_version": data.get("min_version", ""),
                 }
-            continue  # 该源无更新，继续检查下一个源
+            return {"has_update": False}  # 源成功响应，确认无更新
         except Exception as e:
             last_err = e
             continue
 
     if last_err:
         print(f"[更新] 检查失败: {last_err}")
-    return None
+    return {"has_update": False} if any_success else None
 
 
 def download_update(urls, dest_path, progress_cb=None) -> bool:
@@ -125,10 +130,22 @@ def download_update(urls, dest_path, progress_cb=None) -> bool:
                         downloaded += len(chunk)
                         if progress_cb:
                             progress_cb(downloaded, total)
+            # 校验 zip magic bytes，防止代理返回 HTML 错误页
+            with open(dest_path, "rb") as f:
+                magic = f.read(4)
+            if magic[:2] != b'PK':
+                print(f"[更新] {url} 返回的不是有效 zip 文件")
+                continue
             return True
         except Exception as e:
             print(f"[更新] 下载失败 {url}: {e}")
             continue
+    # 全部失败，清理残留的部分下载文件
+    try:
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+    except OSError:
+        pass
     return False
 
 
@@ -145,10 +162,18 @@ def apply_update_and_restart(zip_path, app_dir=None):
         bat_path = os.path.join(app_dir, "_update.bat")
         zp = zip_path.replace("'", "''")
         ad = app_dir.replace("'", "''")
+        err_log = os.path.join(tempfile.gettempdir(), "SteamShelf_update_err.txt")
         bat_content = (
             '@echo off\r\n'
             'timeout /t 2 /nobreak >nul\r\n'
             f'powershell -Command "Expand-Archive -Force \'{zp}\' \'{ad}\'"\r\n'
+            'if %errorlevel% neq 0 (\r\n'
+            f'  echo SteamShelf 更新解压失败，请手动下载新版本覆盖安装。> "{err_log}"\r\n'
+            f'  start notepad "{err_log}"\r\n'
+            f'  start "" "{exe_path}"\r\n'
+            '  del "%~f0"\r\n'
+            '  exit /b 1\r\n'
+            ')\r\n'
             f'start "" "{exe_path}"\r\n'
             'del "%~f0"\r\n'
         )

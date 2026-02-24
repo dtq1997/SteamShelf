@@ -26,19 +26,29 @@ class UpdaterMixin:
             if info and info.get("has_update"):
                 self._update_check_result = "available"
                 self.root.after(0, lambda: self._on_update_available(info))
-            else:
-                self._update_check_result = "latest" if info is None else "failed"
+            elif info is None:
+                # 所有源均失败（网络问题）
+                self._update_check_result = "failed"
                 if manual:
-                    def _show():
-                        try:
-                            p = _parent if _parent.winfo_exists() else self.root
-                        except Exception:
-                            p = self.root
-                        messagebox.showinfo(
-                            "检查更新", f"当前已是最新版本 v{updater.__version__}",
-                            parent=p)
-                    self.root.after(0, _show)
+                    self.root.after(0, lambda: self._show_update_msg(
+                        _parent, "检查更新",
+                        "无法连接更新服务器，请检查网络后重试。"))
+            else:
+                # has_update=False，确认无更新
+                self._update_check_result = "latest"
+                if manual:
+                    self.root.after(0, lambda: self._show_update_msg(
+                        _parent, "检查更新",
+                        f"当前已是最新版本 v{updater.__version__}"))
         threading.Thread(target=bg_thread(_bg), daemon=True).start()
+
+    def _show_update_msg(self, parent, title, msg):
+        """安全弹出更新提示（父窗口可能已销毁）"""
+        try:
+            p = parent if parent.winfo_exists() else self.root
+        except Exception:
+            p = self.root
+        messagebox.showinfo(title, msg, parent=p)
 
     def _on_update_available(self, info):
         """顶部栏显示更新提示标签"""
@@ -108,6 +118,11 @@ class UpdaterMixin:
 
         def _progress(downloaded, total):
             def _ui():
+                try:
+                    if not win.winfo_exists():
+                        return
+                except Exception:
+                    return
                 if total > 0:
                     pct = downloaded * 100 // total
                     prog_bar['value'] = pct
@@ -124,6 +139,11 @@ class UpdaterMixin:
             self.root.after(0, lambda: _on_done(ok))
 
         def _on_done(ok):
+            try:
+                if not win.winfo_exists():
+                    return  # 用户已关闭窗口
+            except Exception:
+                return
             if not ok:
                 prog_label.config(text="下载失败，请检查网络后重试")
                 update_btn.config(state=tk.NORMAL)
