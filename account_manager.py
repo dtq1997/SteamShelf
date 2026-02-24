@@ -146,27 +146,27 @@ class SteamAccountScanner:
                 pass
 
         if system == "Windows":
-            possible = [
-                os.path.expandvars(r"%ProgramFiles(x86)%\Steam"),
-                os.path.expandvars(r"%ProgramFiles%\Steam"),
-                r"C:\Steam", r"D:\Steam", r"E:\Steam",
-                r"D:\Program Files (x86)\Steam",
-                r"D:\Program Files\Steam",
-                r"E:\Program Files (x86)\Steam",
-                r"E:\Program Files\Steam",
-            ]
-            # 尝试注册表
+            # 注册表（最可靠）
             try:
                 import winreg
                 key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                                     r"SOFTWARE\WOW6432Node\Valve\Steam")
                 install_path, _ = winreg.QueryValueEx(key, "InstallPath")
                 winreg.CloseKey(key)
-                if install_path and install_path not in possible:
+                if install_path:
                     paths.append(install_path)
             except (OSError, ImportError):
                 pass
-            paths.extend(possible)
+            # 环境变量展开
+            paths.append(os.path.expandvars(r"%ProgramFiles(x86)%\Steam"))
+            paths.append(os.path.expandvars(r"%ProgramFiles%\Steam"))
+            # 动态枚举所有盘符（A-Z），不再硬编码 C/D/E
+            for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                drive = f"{letter}:\\"
+                if os.path.exists(drive):
+                    paths.append(f"{letter}:\\Steam")
+                    paths.append(f"{letter}:\\Program Files (x86)\\Steam")
+                    paths.append(f"{letter}:\\Program Files\\Steam")
 
         elif system == "Darwin":
             home = os.path.expanduser("~")

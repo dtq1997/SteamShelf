@@ -118,9 +118,8 @@ class InlineAIGenMixin:
 
     # ────────────────────── AI 生成弹出菜单 ──────────────────────
 
-    def _show_ai_gen_menu(self):
-        """弹出 AI 生成菜单（提示词 + 搜索模式选择即生成）"""
-        menu = tk.Menu(self.root, tearoff=0)
+    def _build_ai_gen_menu_items(self, menu):
+        """向 menu 填充 AI 生成选项（SSOT：唯一的菜单项定义点）"""
         menu.add_command(label="📝 提示词设置",
                          command=self._open_prompt_editor)
         menu.add_separator()
@@ -135,6 +134,11 @@ class InlineAIGenMixin:
             command=lambda: self._gen_with_mode("ai_web"))
         menu.add_command(label="     使用 AI 自带搜索工具（更稳定，需模型支持）",
                          state="disabled")
+
+    def _show_ai_gen_menu(self):
+        """弹出 AI 生成菜单（内联按钮用，定位到按钮上方）"""
+        menu = tk.Menu(self.root, tearoff=0)
+        self._build_ai_gen_menu_items(menu)
         btn = self._inline_gen_btn
         menu_h = menu.yposition("end") + 30
         menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() - menu_h)

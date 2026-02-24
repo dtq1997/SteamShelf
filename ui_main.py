@@ -95,7 +95,7 @@ class SteamToolboxMain(
         self._game_name_cache_loaded = False
         self._app_type_cache = {}   # {app_id: type_str} — 缓存 Steam Store API 返回的类型
         self._app_detail_cache = {} # {app_id: detail_dict} — 缓存 Steam Store API 详情
-        self._cache_lock = threading.Lock()  # 保护缓存持久化（防止多线程同时写盘）
+        self._cache_lock = threading.Lock()  # 保护缓存读写（内存+磁盘）
         self._config_mgr = ConfigManager()
         self._config = self._config_mgr.raw  # 向后兼容：Mixin 直接访问 self._config
         # 性能追踪：每次启动清空旧日志
@@ -666,11 +666,13 @@ class SteamToolboxMain(
 
     def _persist_type_cache(self):
         """将游戏类型缓存持久化到配置文件"""
-        self._config_mgr.save_type_cache(dict(self._app_type_cache))
+        with self._cache_lock:
+            self._config_mgr.save_type_cache(dict(self._app_type_cache))
 
     def _persist_detail_cache(self):
         """将游戏详情缓存持久化到配置文件"""
-        self._config_mgr.save_detail_cache(dict(self._app_detail_cache))
+        with self._cache_lock:
+            self._config_mgr.save_detail_cache(dict(self._app_detail_cache))
 
     def _bg_resolve_missing_names(self):
         """后台线程：解析仍显示为 AppID 的游戏名称"""
@@ -683,17 +685,19 @@ class SteamToolboxMain(
         bulk_names = SteamAccountScanner.fetch_all_steam_app_names(
             api_key=self._config.get("steam_web_api_key", ""))
         if bulk_names:
-            for aid in missing:
-                if aid in bulk_names:
-                    self._game_name_cache[aid] = bulk_names[aid]
-                    resolved_any = True
+            with self._cache_lock:
+                for aid in missing:
+                    if aid in bulk_names:
+                        self._game_name_cache[aid] = bulk_names[aid]
+                        resolved_any = True
             missing = [aid for aid in missing
                        if aid not in self._game_name_cache]
         for aid in missing:
             try:
                 name = get_game_name_from_steam(aid)
                 if name and not name.startswith("AppID "):
-                    self._game_name_cache[aid] = name
+                    with self._cache_lock:
+                        self._game_name_cache[aid] = name
                     resolved_any = True
                 time.sleep(0.3)
             except Exception:
@@ -782,10 +786,11 @@ class SteamToolboxMain(
                         if result is None:
                             continue
                         aid, name, type_str, detail = result
-                        if name and not name.startswith("AppID "):
-                            self._game_name_cache[aid] = name
-                        self._app_type_cache[aid] = type_str or ""
-                        self._app_detail_cache[aid] = detail or {"_removed": True}
+                        with self._cache_lock:
+                            if name and not name.startswith("AppID "):
+                                self._game_name_cache[aid] = name
+                            self._app_type_cache[aid] = type_str or ""
+                            self._app_detail_cache[aid] = detail or {"_removed": True}
                         persist += 1
                         if persist % 200 == 0:
                             self._persist_all_caches()
@@ -1163,8 +1168,9 @@ class SteamToolboxMain(
         note_menu.add_separator()
         note_menu.add_command(label="🗑 删除笔记", command=self._ui_delete_notes)
         menu.add_cascade(label="📝 笔记操作", menu=note_menu)
-        menu.add_command(label="🤖 AI 生成游戏说明",
-                         command=self._show_ai_gen_menu)
+        ai_menu = tk.Menu(menu, tearoff=0)
+        self._build_ai_gen_menu_items(ai_menu)
+        menu.add_cascade(label="🤖 AI 生成游戏说明", menu=ai_menu)
         # Cloud 上传（条件显示）
         dirty_n = self.manager.dirty_count() if self.manager else 0
         if dirty_n > 0:

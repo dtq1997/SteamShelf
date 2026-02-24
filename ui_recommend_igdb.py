@@ -333,8 +333,8 @@ def _build_company_tab(app, state):
                                 if c.get('id')]
                         company_counts = \
                             app._collections_core.count_igdb_company_steam_games(cids)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[IGDB] 公司游戏计数失败: {e}")
             except Exception as ex:
                 companies, error = [], \
                     f"线程异常：{type(ex).__name__}: {ex}"

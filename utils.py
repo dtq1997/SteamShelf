@@ -10,6 +10,28 @@ import ssl
 
 
 # ═══════════════════════════════════════════════════════════
+# Steam EAppType 位标志常量（SSOT：唯一定义点）
+# ═══════════════════════════════════════════════════════════
+# 来源：CEF appStore 的 type 字段（位掩码）
+ETYPE_GAME = 0x001
+ETYPE_APP = 0x002
+ETYPE_TOOL = 0x004
+ETYPE_DEMO = 0x008
+ETYPE_DLC = 0x020
+ETYPE_VIDEO = 0x800
+ETYPE_MUSIC = 0x2000
+ETYPE_BETA = 0x10000
+ETYPE_SHORTCUT = 0x40000000
+
+# Steam Store API type 字符串 → EAppType 位标志
+STORE_TYPE_MAP = {
+    "game": ETYPE_GAME, "dlc": ETYPE_DLC, "demo": ETYPE_DEMO,
+    "music": ETYPE_MUSIC, "video": ETYPE_VIDEO, "tool": ETYPE_TOOL,
+    "application": ETYPE_APP, "hardware": ETYPE_APP,
+}
+
+
+# ═══════════════════════════════════════════════════════════
 # Steam 排序键 — 匹配 Steam 客户端的 localeCompare('zh-CN')
 # ═══════════════════════════════════════════════════════════
 #
@@ -165,5 +187,20 @@ def get_ssl_context():
 
 
 def urlopen(req, timeout=30):
-    """封装 urlopen，自动处理 SSL 证书问题"""
-    return urllib.request.urlopen(req, timeout=timeout, context=get_ssl_context())
+    """封装 urlopen，自动处理 SSL 证书问题
+
+    两层兜底：
+    1. get_ssl_context() 选择最佳 SSL 上下文
+    2. 连接时证书验证失败 → 自动降级到不验证证书（Windows 常见）
+    """
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=get_ssl_context())
+    except ssl.SSLCertVerificationError:
+        # create_default_context() 成功但系统证书链损坏 → 降级
+        ctx = ssl._create_unverified_context()
+        # Request 对象被消费后不能重用，需要重建
+        if isinstance(req, urllib.request.Request):
+            req = urllib.request.Request(
+                req.full_url, headers=dict(req.headers),
+                method=req.get_method())
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)

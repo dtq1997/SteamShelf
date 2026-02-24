@@ -17,6 +17,9 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, ttk
 from ui_utils import AutoScrollbar, bg_thread
+from utils import (ETYPE_GAME, ETYPE_APP, ETYPE_TOOL, ETYPE_DEMO,
+                   ETYPE_DLC, ETYPE_VIDEO, ETYPE_MUSIC, ETYPE_BETA,
+                   ETYPE_SHORTCUT)
 
 from account_manager import SteamAccountScanner
 from steam_data import parse_release_date
@@ -590,30 +593,24 @@ class LibraryMixin(LibraryCollectionsMixin, LibrarySourceUpdateMixin):
 
     @staticmethod
     def _get_type_name(app_type):
-        """将 Steam EAppType 枚举值转换为显示字符串
-
-        官方枚举（十六进制）：
-        0x001=Game, 0x002=App, 0x004=Tool, 0x008=Demo,
-        0x020=DLC, 0x800=Video, 0x2000=Music, 0x10000=Beta,
-        0x40000000=Shortcut
-        """
-        if app_type == 0 or app_type & 1:
+        """将 Steam EAppType 枚举值转换为显示字符串（常量定义在 utils.py）"""
+        if app_type == 0 or app_type & ETYPE_GAME:
             return "Game"
-        elif app_type & 0x2000:
+        elif app_type & ETYPE_MUSIC:
             return "Music"
-        elif app_type & 0x020:
+        elif app_type & ETYPE_DLC:
             return "DLC"
-        elif app_type & 0x008:
+        elif app_type & ETYPE_DEMO:
             return "Demo"
-        elif app_type & 0x004:
+        elif app_type & ETYPE_TOOL:
             return "Tool"
-        elif app_type & 0x002:
+        elif app_type & ETYPE_APP:
             return "App"
-        elif app_type & 0x800:
+        elif app_type & ETYPE_VIDEO:
             return "Video"
-        elif app_type & 0x10000:
+        elif app_type & ETYPE_BETA:
             return "Beta"
-        elif app_type & 0x40000000:
+        elif app_type & ETYPE_SHORTCUT:
             return "Link"
         else:
             return "Game"
