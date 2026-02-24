@@ -4,7 +4,7 @@
 
 | 层级 | 含义 | 规则 |
 |------|------|------|
-| 🔴 铁律 | 从未跳过，跳过必出问题 | 工作流（Pre-mortem→实现→验证→报告）、SSOT、Bug全扫、代码质量数字、UX审视 |
+| 🔴 铁律 | 从未跳过，跳过必出问题 | 工作流（Pre-mortem→实现→验证→报告）、SSOT、Bug全扫、代码质量数字、UX审视、**发版必须走 tag 流程** |
 | 🟡 强默认 | 通常遵守，特定条件下可灵活 | 静态检查、行为验证、架构规则、节省Token、主动确认 |
 | 🟢 弹性 | 与铁律冲突时可降级 | UI视觉验证（用户手动测试更高效时）、任务过载保护（相关任务可合并）、日志（非调试场景） |
 
@@ -58,6 +58,22 @@
 1. 修当前 bug → 2. 提炼模式特征 → 3. grep 全盘扫描 → 4. 一次修完 → 5. 回归免疫（已知坑 + dev-mode 断言）
 
 **只修一处 = 未完成。没有回归防线 = 未完成。**
+
+## 🔴 发版铁律（最高优先级）
+
+**禁止手动 `gh release create`。必须走 tag 触发 GitHub Actions 自动构建。**
+
+发版流程（唯一正确路径）：
+1. `updater.py` 改版本号
+2. `git commit` → `git tag -a vX.X.X -m "changelog"` → `git push && git push --tags`
+3. GitHub Actions 自动打包 Win + Mac + Source + version.json → 创建 Release
+4. 等 Actions 完成，确认 Release 页面有 `SteamShelf_win.zip`
+
+**为什么**：Release 必须同时包含 Win/Mac/Source 三个 zip，否则新用户无法下载、老用户无法自动更新。手动创建 release 会跳过构建，导致缺少平台包。
+
+**违反后果**：新用户看到空 release 无法使用；老客户端检测到新版本但下载失败。
+
+**敏感文件排除**：`_scripts/` 含 API key 等敏感数据，workflow 和手动打包均必须排除。排除列表见 `.github/workflows/release.yml`。
 
 ## 🔴 代码质量红线
 

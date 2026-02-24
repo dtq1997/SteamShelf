@@ -57,7 +57,9 @@ jobs:
         run: |
           zip -r artifacts/SteamShelf_source.zip . \
             -x '.git/*' '__pycache__/*' 'build/*' 'dist/*' \
-               '.github/*' '*.pyc' '_backup/*' '_dead_code/*'
+               '.github/*' '*.pyc' '_backup/*' '_dead_code/*' \
+               '_scripts/*' '_legacy_A/*' '.ruff_cache/*' \
+               '.claude/*' '.DS_Store' '.dev'
 
       - name: Extract version and generate version.json
         id: meta
