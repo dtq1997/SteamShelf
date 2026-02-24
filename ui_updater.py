@@ -119,7 +119,9 @@ class UpdaterMixin:
         import sys as _sys
         update_btn.config(state=tk.DISABLED)
         prog_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
-        prog_label.config(text="正在下载...")
+        prog_bar.config(mode='indeterminate')
+        prog_bar.start(15)  # 连接阶段：不定进度动画
+        prog_label.config(text="正在连接服务器...")
         # Windows frozen → 临时目录（bat 脚本自动处理）
         # 其他 → ~/Downloads（用户友好）
         if _sys.platform == "win32" and getattr(_sys, 'frozen', False):
@@ -145,8 +147,30 @@ class UpdaterMixin:
                     prog_label.config(text=f"下载中: {mb:.1f} MB")
             self.root.after(0, _ui)
 
+        _switched_to_determinate = False
+
+        def _status(msg):
+            nonlocal _switched_to_determinate
+            def _ui():
+                nonlocal _switched_to_determinate
+                try:
+                    if not win.winfo_exists():
+                        return
+                except Exception:
+                    return
+                if msg is None:
+                    # 连接成功，切换到确定进度条
+                    if not _switched_to_determinate:
+                        _switched_to_determinate = True
+                        prog_bar.stop()
+                        prog_bar.config(mode='determinate', value=0)
+                else:
+                    prog_label.config(text=msg)
+            self.root.after(0, _ui)
+
         def _bg():
-            ok = updater.download_update(info["download_urls"], dest, _progress)
+            ok = updater.download_update(
+                info["download_urls"], dest, _progress, _status)
             self.root.after(0, lambda: _on_done(ok))
 
         def _on_done(ok):

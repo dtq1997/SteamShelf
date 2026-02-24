@@ -12,7 +12,7 @@ import tempfile
 
 from utils import urlopen
 
-__version__ = "5.9.6"
+__version__ = "5.9.7"
 
 UPDATE_SOURCES = [
     "https://gh-proxy.com/https://github.com/dtq1997/SteamShelf/releases/latest/download/version.json",
@@ -108,19 +108,29 @@ def check_update(timeout=10):
     return {"has_update": False} if any_success else None
 
 
-def download_update(urls, dest_path, progress_cb=None) -> bool:
+def download_update(urls, dest_path, progress_cb=None,
+                    status_cb=None) -> bool:
     """从 urls 列表降级下载到 dest_path，返回是否成功
 
     progress_cb(downloaded_bytes, total_bytes) — total 可能为 0（未知）
+    status_cb(message) — 连接/切换镜像等状态文本
     """
+    import time
     import urllib.request
-    for url in urls:
+    n = len(urls)
+    _last_cb_time = 0.0
+    for i, url in enumerate(urls):
         try:
+            if status_cb:
+                label = _mirror_label(url)
+                status_cb(f"连接 {label}...（{i+1}/{n}）")
             req = urllib.request.Request(url, headers={
                 "User-Agent": f"SteamShelf/{__version__}"})
-            with urlopen(req, timeout=60) as resp:
+            with urlopen(req, timeout=20) as resp:
                 total = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
+                if status_cb:
+                    status_cb(None)  # 清除状态，切换到进度模式
                 with open(dest_path, "wb") as f:
                     while True:
                         chunk = resp.read(65536)
@@ -128,8 +138,14 @@ def download_update(urls, dest_path, progress_cb=None) -> bool:
                             break
                         f.write(chunk)
                         downloaded += len(chunk)
-                        if progress_cb:
+                        # 节流：最多 10 次/秒
+                        now = time.monotonic()
+                        if progress_cb and now - _last_cb_time >= 0.1:
+                            _last_cb_time = now
                             progress_cb(downloaded, total)
+                # 最终进度确保 100%
+                if progress_cb:
+                    progress_cb(downloaded, total)
             # 校验 zip magic bytes，防止代理返回 HTML 错误页
             with open(dest_path, "rb") as f:
                 magic = f.read(4)
@@ -149,6 +165,17 @@ def download_update(urls, dest_path, progress_cb=None) -> bool:
     return False
 
 
+def _mirror_label(url: str) -> str:
+    """从下载 URL 提取简短镜像名"""
+    if 'gh-proxy' in url:
+        return 'gh-proxy'
+    if 'ghfast' in url:
+        return 'ghfast'
+    if 'github.com' in url:
+        return 'GitHub'
+    return url.split('/')[2][:20]
+
+
 def apply_update_and_restart(zip_path, app_dir=None):
     """写批处理脚本 → 启动 → 退出当前进程
 
@@ -163,9 +190,20 @@ def apply_update_and_restart(zip_path, app_dir=None):
         zp = zip_path.replace("'", "''")
         ad = app_dir.replace("'", "''")
         err_log = os.path.join(tempfile.gettempdir(), "SteamShelf_update_err.txt")
+        # Defender 排除：用 base64 编码避免 bat→PS→PS 三层引号嵌套
+        import base64
+        defender_ps = f"Add-MpPreference -ExclusionPath '{app_dir}'"
+        defender_b64 = base64.b64encode(
+            defender_ps.encode('utf-16-le')).decode('ascii')
         bat_content = (
             '@echo off\r\n'
             'timeout /t 2 /nobreak >nul\r\n'
+            # 尝试添加 Defender 排除（弹 UAC，用户拒绝则跳过）
+            f'powershell -NoProfile -Command "Start-Process powershell'
+            f" -Verb RunAs -ArgumentList '-NoProfile',"
+            f"'-EncodedCommand','{defender_b64}'"
+            f'" 2>nul\r\n'
+            # 解压更新
             f'powershell -Command "Expand-Archive -Force \'{zp}\' \'{ad}\'"\r\n'
             'if %errorlevel% neq 0 (\r\n'
             f'  echo SteamShelf 更新解压失败，请手动下载新版本覆盖安装。> "{err_log}"\r\n'
